@@ -647,6 +647,7 @@ MISC_KMODS	+= klmmod klmops
 #
 CRYPTO_KMODS	+= aes
 CRYPTO_KMODS	+= arcfour
+CRYPTO_KMODS	+= blake2
 CRYPTO_KMODS	+= blowfish
 CRYPTO_KMODS	+= des
 CRYPTO_KMODS	+= ecc
