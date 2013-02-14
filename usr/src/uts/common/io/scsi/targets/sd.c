@@ -52,6 +52,7 @@
 #include <sys/efi_partition.h>
 #include <sys/var.h>
 #include <sys/aio_req.h>
+#include <sys/dkioc_free_util.h>
 
 #ifdef __lock_lint
 #define	_LP64
@@ -1532,6 +1533,9 @@ static int sd_send_scsi_PERSISTENT_RESERVE_OUT(sd_ssc_t *ssc,
 static int sd_send_scsi_SYNCHRONIZE_CACHE(struct sd_lun *un,
 	struct dk_callback *dkc);
 static int sd_send_scsi_SYNCHRONIZE_CACHE_biodone(struct buf *bp);
+static int sd_send_scsi_UNMAP(struct sd_lun *un, dkioc_free_list_t *dfl,
+	struct dk_callback *dkc, int flag);
+static int sd_send_scsi_UNMAP_biodone(struct buf *bp);
 static int sd_send_scsi_GET_CONFIGURATION(sd_ssc_t *ssc,
 	struct uscsi_cmd *ucmdbuf, uchar_t *rqbuf, uint_t rqbuflen,
 	uchar_t *bufaddr, uint_t buflen, int path_flag);
@@ -21406,6 +21410,232 @@ done:
 	return (status);
 }
 
+typedef struct unmap_param_hdr_s {
+	uint16_t	uph_data_len;
+	uint16_t	uph_descr_data_len;
+	uint32_t	uph_reserved;
+} unmap_param_hdr_t;
+
+typedef struct unmap_blk_descr_s {
+	uint64_t	ubd_lba;
+	uint32_t	ubd_num_blks;
+	uint32_t	ubd_reserved;
+} unmap_blk_descr_t;
+
+/*
+ * Constructs and sends a SCSI UNMAP command from the list of extents to
+ * be freed. The caller is responsible for freeing the passed extent list
+ * (for calls from userspace, a local copy is automatically created and
+ * destroyed).
+ */
+static int
+sd_send_scsi_UNMAP(struct sd_lun *un, dkioc_free_list_t *dfl,
+    struct dk_callback *dkc, int flag)
+{
+	struct sd_uscsi_info		*uip;
+	struct uscsi_cmd		*uscmd;
+	union scsi_cdb			*cdb;
+	struct buf			*bp;
+	int				rval = 0;
+	int				is_async;
+	unmap_param_hdr_t		*uph;
+	caddr_t				params;
+	size_t				param_size;
+
+	SD_TRACE(SD_LOG_IO, un, "sd_send_scsi_UNMAP: entry: un:0x%p\n", un);
+
+	ASSERT(un != NULL);
+	ASSERT(!mutex_owned(SD_MUTEX(un)));
+	ASSERT(dfl != NULL);
+
+	if (dkc == NULL || dkc->dkc_callback == NULL) {
+		is_async = FALSE;
+	} else {
+		is_async = TRUE;
+	}
+
+	/*
+	 * For userspace calls we must copy in.
+	 */
+	if (!(flag & FKIOCTL)) {
+		dkioc_free_list_t *my_dfl = dfl_new(KM_SLEEP, 0);
+
+		if (ddi_copyin(dfl, my_dfl, sizeof (*dfl), 0) == -1) {
+			dfl_destroy(my_dfl);
+			return (SET_ERROR(EFAULT));
+		}
+		dfl = my_dfl;
+	}
+
+	/* Check limits */
+	if (dfl->dfl_num_exts > DFL_MAX_EXTENTS) {
+		if (!(flag & FKIOCTL))
+			dfl_destroy(dfl);
+		return (SET_ERROR(EINVAL));
+	}
+
+	/*
+	 * Serialize all extent data into an UNMAP parameter list.
+	 */
+	param_size = sizeof (unmap_param_hdr_t) +
+	    dfl->dfl_num_exts * sizeof (unmap_blk_descr_t);
+	params = kmem_zalloc(param_size, KM_SLEEP);
+
+	uph = (unmap_param_hdr_t *)params;
+	uph->uph_data_len = htons(param_size - 1);
+	uph->uph_descr_data_len = htons(param_size - 7);
+	for (int i = 0; i < dfl->dfl_num_exts; i++) {
+		/* Do some more checking here as well */
+		if (dfl->dfl_exts[i].ext_length > DFL_MAX_EXT_LEN) {
+			if (!(flag & FKIOCTL))
+				dfl_destroy(dfl);
+			return (SET_ERROR(EINVAL));
+		}
+		unmap_blk_descr_t *ubd = (unmap_blk_descr_t *)(params +
+		    sizeof (*uph) + (sizeof (*ubd) * i));
+
+		ubd->ubd_lba = htonll(dfl->dfl_exts[i].ext_start);
+		ubd->ubd_num_blks =
+		    htonl(dfl->dfl_exts[i].ext_length / DEV_BSIZE);
+	}
+
+	/* Command is serialized in data buf now, so discard any temp lists. */
+	if (!(flag & FKIOCTL)) {
+		dfl_destroy(dfl);
+		dfl = NULL;
+	}
+
+	cdb = kmem_zalloc(CDB_GROUP1, KM_SLEEP);
+	cdb->scc_cmd = SCMD_UNMAP;
+
+	/*
+	 * First get some memory for the uscsi_cmd struct and cdb
+	 * and initialize for UNMAP cmd.
+	 */
+	uscmd = kmem_zalloc(sizeof (struct uscsi_cmd), KM_SLEEP);
+	uscmd->uscsi_cdblen = CDB_GROUP1;
+	uscmd->uscsi_cdb = (caddr_t)cdb;
+	uscmd->uscsi_bufaddr = params;
+	uscmd->uscsi_buflen = param_size;
+	uscmd->uscsi_rqbuf = kmem_zalloc(SENSE_LENGTH, KM_SLEEP);
+	uscmd->uscsi_rqlen = SENSE_LENGTH;
+	uscmd->uscsi_rqresid = SENSE_LENGTH;
+	uscmd->uscsi_flags = USCSI_RQENABLE | USCSI_SILENT;
+	uscmd->uscsi_timeout = sd_io_time;
+
+	/*
+	 * Allocate an sd_uscsi_info struct and fill it with the info
+	 * needed by sd_initpkt_for_uscsi().  Then put the pointer into
+	 * b_private in the buf for sd_initpkt_for_uscsi().  Note that
+	 * since we allocate the buf here in this function, we do not
+	 * need to preserve the prior contents of b_private.
+	 * The sd_uscsi_info struct is also used by sd_uscsi_strategy()
+	 */
+	uip = kmem_zalloc(sizeof (struct sd_uscsi_info), KM_SLEEP);
+	uip->ui_flags = SD_PATH_DIRECT;
+	uip->ui_cmdp  = uscmd;
+
+	bp = getrbuf(KM_SLEEP);
+	bp->b_private = uip;
+
+	/*
+	 * Setup buffer to carry uscsi request.
+	 */
+	bp->b_flags  = B_BUSY;
+	bp->b_bcount = 0;
+	bp->b_blkno  = 0;
+
+	if (is_async == TRUE) {
+		bp->b_iodone = sd_send_scsi_UNMAP_biodone;
+		uip->ui_dkc = *dkc;
+	}
+
+	bp->b_edev = SD_GET_DEV(un);
+	bp->b_dev = cmpdev(bp->b_edev);	/* maybe unnecessary? */
+
+	(void) sd_uscsi_strategy(bp);
+
+	/*
+	 * If synchronous request, wait for completion
+	 * If async just return and let b_iodone callback
+	 * cleanup.
+	 * NOTE: On return, u_ncmds_in_driver will be decremented,
+	 * but it was also incremented in sd_uscsi_strategy(), so
+	 * we should be ok.
+	 */
+	if (is_async == FALSE) {
+		(void) biowait(bp);
+		rval = sd_send_scsi_UNMAP_biodone(bp);
+	}
+
+	return (rval);
+}
+
+static int
+sd_send_scsi_UNMAP_biodone(struct buf *bp)
+{
+	struct sd_uscsi_info *uip;
+	struct uscsi_cmd *uscmd;
+	uint8_t *sense_buf;
+	struct sd_lun *un;
+	int status;
+
+	uip = (struct sd_uscsi_info *)(bp->b_private);
+	ASSERT(uip != NULL);
+
+	uscmd = uip->ui_cmdp;
+	ASSERT(uscmd != NULL);
+
+	sense_buf = (uint8_t *)uscmd->uscsi_rqbuf;
+	ASSERT(sense_buf != NULL);
+
+	un = ddi_get_soft_state(sd_state, SD_GET_INSTANCE_FROM_BUF(bp));
+	ASSERT(un != NULL);
+
+	status = geterror(bp);
+	switch (status) {
+	case 0:
+		break;	/* Success! */
+	case EIO:
+		switch (uscmd->uscsi_status) {
+		case STATUS_CHECK:
+			if ((uscmd->uscsi_rqstatus == STATUS_GOOD) &&
+			    (scsi_sense_key(sense_buf) ==
+			    KEY_ILLEGAL_REQUEST)) {
+				/* Ignore Illegal Request error */
+				SD_TRACE(SD_LOG_IO, un,
+				    "sd_send_scsi_UNMAP_biodone: \
+				    illegal request?\n");
+				status = SET_ERROR(ENOTSUP);
+				goto done;
+			}
+			break;
+		default:
+			break;
+		}
+		/* FALLTHRU */
+	default:
+		scsi_log(SD_DEVINFO(un), sd_label, CE_WARN,
+		    "UNMAP command failed (%d)\n", status);
+		break;
+	}
+
+done:
+	if (uip->ui_dkc.dkc_callback != NULL) {
+		(*uip->ui_dkc.dkc_callback)(uip->ui_dkc.dkc_cookie, status);
+	}
+
+	ASSERT((bp->b_flags & B_REMAPPED) == 0);
+	freerbuf(bp);
+	kmem_free(uip, sizeof (struct sd_uscsi_info));
+	kmem_free(uscmd->uscsi_rqbuf, SENSE_LENGTH);
+	kmem_free(uscmd->uscsi_cdb, (size_t)uscmd->uscsi_cdblen);
+	kmem_free(uscmd->uscsi_bufaddr, uscmd->uscsi_buflen);
+	kmem_free(uscmd, sizeof (struct uscsi_cmd));
+
+	return (status);
+}
+
 
 /*
  *    Function: sd_send_scsi_GET_CONFIGURATION
@@ -23142,6 +23372,20 @@ skip_ready_valid:
 				/* synchronous SYNC CACHE request */
 				err = sd_send_scsi_SYNCHRONIZE_CACHE(un, NULL);
 			}
+		}
+		break;
+
+	case DKIOCFREE:
+		{
+			dkioc_free_list_t *dfl = (dkioc_free_list_t *)arg;
+
+			/* bad userspace ioctls shouldn't panic */
+			if (dfl == NULL && !(flag & FKIOCTL)) {
+				err = SET_ERROR(EINVAL);
+				break;
+			}
+			/* synchronous UNMAP request */
+			err = sd_send_scsi_UNMAP(un, dfl, NULL, flag);
 		}
 		break;
 

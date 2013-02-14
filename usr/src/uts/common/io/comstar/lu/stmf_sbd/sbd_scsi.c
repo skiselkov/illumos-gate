@@ -37,6 +37,7 @@
 #include <sys/atomic.h>
 #include <sys/sdt.h>
 #include <sys/dkio.h>
+#include <sys/dkioc_free_util.h>
 
 #include <sys/stmf.h>
 #include <sys/lpif.h>
@@ -2467,12 +2468,16 @@ sbd_handle_write_same(scsi_task_t *task, struct stmf_data_buf *initial_dbuf)
 
 	/* Check if the command is for the unmap function */
 	if (unmap) {
-		if (sbd_unmap(sl, addr, len) != 0) {
+		dkioc_free_list_t *dfl = dfl_new(KM_SLEEP, 0);
+
+		dfl_append(dfl, addr, len);
+		if (sbd_unmap(dfl, sl) != 0) {
 			stmf_scsilib_send_status(task, STATUS_CHECK,
 			    STMF_SAA_LBA_OUT_OF_RANGE);
 		} else {
 			stmf_scsilib_send_status(task, STATUS_GOOD, 0);
 		}
+		dfl_destroy(dfl);
 		return;
 	}
 
@@ -2576,6 +2581,7 @@ sbd_handle_unmap_xfer(scsi_task_t *task, uint8_t *buf, uint32_t buflen)
 	uint32_t ulen, dlen, num_desc;
 	uint64_t addr, len;
 	uint8_t *p;
+	dkioc_free_list_t *dfl;
 	int ret;
 
 	if (buflen < 24) {
@@ -2593,17 +2599,35 @@ sbd_handle_unmap_xfer(scsi_task_t *task, uint8_t *buf, uint32_t buflen)
 		return;
 	}
 
+	if (num_desc > DFL_MAX_EXTENTS) {
+		stmf_scsilib_send_status(task, STATUS_CHECK,
+		    STMF_SAA_INVALID_FIELD_IN_CDB);
+		return;
+	}
+
+	dfl = dfl_new(KM_SLEEP, 0);
 	for (p = buf + 8; num_desc; num_desc--, p += 16) {
 		addr = READ_SCSI64(p, uint64_t);
 		addr <<= sl->sl_data_blocksize_shift;
 		len = READ_SCSI32(p+8, uint64_t);
 		len <<= sl->sl_data_blocksize_shift;
-		ret = sbd_unmap(sl, addr, len);
-		if (ret != 0) {
+		if (len > DFL_MAX_EXT_LEN) {
 			stmf_scsilib_send_status(task, STATUS_CHECK,
-			    STMF_SAA_LBA_OUT_OF_RANGE);
+			    STMF_SAA_INVALID_FIELD_IN_CDB);
+			dfl_destroy(dfl);
 			return;
 		}
+		/* Prepare a list of extents to unmap */
+		dfl_append(dfl, addr, len);
+	}
+
+	/* Finally execute the unmap operations in a single step */
+	ret = sbd_unmap(dfl, sl);
+	dfl_destroy(dfl);
+	if (ret != 0) {
+		stmf_scsilib_send_status(task, STATUS_CHECK,
+		    STMF_SAA_LBA_OUT_OF_RANGE);
+		return;
 	}
 
 unmap_done:

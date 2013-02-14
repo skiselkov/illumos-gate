@@ -30,6 +30,7 @@
 #define	_SYS_DKIO_H
 
 #include <sys/dklabel.h>	/* Needed for NDKMAP define */
+#include <sys/int_limits.h>	/* Needed for UINT16_MAX */
 
 #ifdef	__cplusplus
 extern "C" {
@@ -523,17 +524,23 @@ typedef struct dk_updatefw_32 {
 
 /*
  * ioctl to free space (e.g. SCSI UNMAP) off a disk.
+ * Pass a dkioc_free_t containing a list of dkioc_free_extent_t's.
  */
 #define	DKIOCFREE	(DKIOC|50)
 
-typedef struct dkioc_free_s {
-	uint32_t df_flags;
-	uint32_t df_reserved;   /* For easy 64-bit alignment below... */
-	diskaddr_t df_start;
-	diskaddr_t df_length;
-} dkioc_free_t;
-
 #define	DF_WAIT_SYNC	0x00000001	/* Wait for full write-out of free. */
+
+#define	DFL_MAX_EXTENTS	(UINT16_MAX / 16)  /* Max number of extents in list */
+#define	DFL_MAX_EXT_LEN	(UINT32_MAX * DEV_BSIZE)	/* Max extent length */
+typedef struct dkioc_free_list_s {
+	uint32_t		dfl_flags;
+	uint16_t		dfl_num_exts;
+	uint16_t		dfl_reserved;		/* for alignment */
+	struct {
+		diskaddr_t ext_start;
+		diskaddr_t ext_length;
+	} dfl_exts[DFL_MAX_EXTENTS];
+} dkioc_free_list_t;
 
 #ifdef	__cplusplus
 }

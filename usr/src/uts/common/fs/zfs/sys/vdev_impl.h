@@ -65,6 +65,7 @@ typedef void	vdev_io_done_func_t(zio_t *zio);
 typedef void	vdev_state_change_func_t(vdev_t *vd, int, int);
 typedef void	vdev_hold_func_t(vdev_t *vd);
 typedef void	vdev_rele_func_t(vdev_t *vd);
+typedef void	vdev_trim_func_t(vdev_t *vd, zio_t *pio, void *trim_exts);
 
 typedef struct vdev_ops {
 	vdev_open_func_t		*vdev_op_open;
@@ -75,6 +76,7 @@ typedef struct vdev_ops {
 	vdev_state_change_func_t	*vdev_op_state_change;
 	vdev_hold_func_t		*vdev_op_hold;
 	vdev_rele_func_t		*vdev_op_rele;
+	vdev_trim_func_t		*vdev_op_trim;
 	char				vdev_op_type[16];
 	boolean_t			vdev_op_leaf;
 } vdev_ops_t;
@@ -195,6 +197,7 @@ struct vdev {
 	uint64_t	vdev_not_present; /* not present during import	*/
 	uint64_t	vdev_unspare;	/* unspare when resilvering done */
 	boolean_t	vdev_nowritecache; /* true if flushwritecache failed */
+	boolean_t	vdev_notrim;	/* true if Unmap/TRIM is unsupported */
 	boolean_t	vdev_checkremove; /* temporary online test	*/
 	boolean_t	vdev_forcefault; /* force online fault		*/
 	boolean_t	vdev_splitting;	/* split or repair in progress  */

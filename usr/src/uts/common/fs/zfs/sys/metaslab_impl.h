@@ -97,6 +97,11 @@ struct metaslab_group {
 	uint64_t		mg_histogram[RANGE_TREE_HISTOGRAM_SIZE];
 };
 
+typedef struct {
+	uint64_t	ts_birth;	/* TXG at which this trimset starts */
+	range_tree_t	*ts_tree;	/* tree of extents in the trimset */
+} metaslab_trimset_t;
+
 /*
  * This value defines the number of elements in the ms_lbas array. The value
  * of 64 was chosen as it covers all power of 2 buckets up to UINT64_MAX.
@@ -169,6 +174,8 @@ struct metaslab {
 	range_tree_t	*ms_freetree[TXG_SIZE];
 	range_tree_t	*ms_defertree[TXG_DEFER_SIZE];
 	range_tree_t	*ms_tree;
+	metaslab_trimset_t	*ms_cur_ts; /* currently prepared trims */
+	metaslab_trimset_t	*ms_prev_ts;  /* previous (aging) trims */
 
 	boolean_t	ms_condensing;	/* condensing? */
 	boolean_t	ms_condense_wanted;

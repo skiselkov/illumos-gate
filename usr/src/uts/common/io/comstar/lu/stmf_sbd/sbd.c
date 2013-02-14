@@ -3690,22 +3690,21 @@ out:
 
 /*
  * Unmap a region in a volume.  Currently only supported for zvols.
+ * The list of extents to be freed is passed in a dkioc_free_list_t
+ * which the caller is responsible for destroying.
  */
 int
-sbd_unmap(sbd_lu_t *sl, uint64_t offset, uint64_t length)
+sbd_unmap(dkioc_free_list_t *dfl, sbd_lu_t *sl)
 {
 	vnode_t *vp;
-	int unused;
-	dkioc_free_t df;
+	int unused, ret;
 
-	/* Right now, we only support UNMAP on zvols. */
-	if (!(sl->sl_flags & SL_ZFS_META))
-		return (EIO);
+	/* Nothing to do */
+	if (dfl->dfl_num_exts == 0)
+		return (0);
 
-	df.df_flags = (sl->sl_flags & SL_WRITEBACK_CACHE_DISABLE) ?
+	dfl->dfl_flags = (sl->sl_flags & SL_WRITEBACK_CACHE_DISABLE) ?
 	    DF_WAIT_SYNC : 0;
-	df.df_start = offset;
-	df.df_length = length;
 
 	/* Use the data vnode we have to send a fop_ioctl(). */
 	vp = sl->sl_data_vp;
@@ -3714,6 +3713,8 @@ sbd_unmap(sbd_lu_t *sl, uint64_t offset, uint64_t length)
 		return (EIO);
 	}
 
-	return (VOP_IOCTL(vp, DKIOCFREE, (intptr_t)(&df), FKIOCTL, kcred,
-	    &unused, NULL));
+	ret = VOP_IOCTL(vp, DKIOCFREE, (intptr_t)(&dfl), FKIOCTL, kcred,
+	    &unused, NULL);
+
+	return (ret);
 }

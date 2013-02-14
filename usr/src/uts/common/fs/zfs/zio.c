@@ -39,6 +39,7 @@
 #include <sys/ddt.h>
 #include <sys/blkptr.h>
 #include <sys/zfeature.h>
+#include <sys/dkioc_free_util.h>
 
 /*
  * ==========================================================================
@@ -96,6 +97,31 @@ int zio_buf_debug_limit = 16384;
 #else
 int zio_buf_debug_limit = 0;
 #endif
+
+/*
+ * Tunable to allow for debugging SCSI Unmap/SATA TRIM calls. Disabling
+ * it will prevent ZFS from attempting to issue DKIOCFREE ioctls to the
+ * underlying storage. Synchronous write performance may degrade over
+ * time with zfs_trim unset.
+ */
+boolean_t zfs_trim = B_TRUE;
+
+/*
+ * At most how many extents we pass in a single UNMAP/TRIM command. If we need
+ * to trim more extents, we will split these up between multiple commands.
+ * Please note that this is constrained by the underlying command syntax
+ * (see DFL_MAX_EXTENTS in sys/dkio.h).
+ */
+int zfs_max_exts_per_trim = 1024;
+
+/*
+ * Maximum size of a single extent handed to Unmap/TRIM. If the extent we need
+ * to trim is larger than this, it is split up into multiple extents of at
+ * most this size. Please note that this is contrained by the underlying
+ * command syntax. SCSI UNMAP supports extents at most 2^32 * block_size in
+ * length.
+ */
+uint64_t zfs_max_extent_size_per_trim_ext = UINT32_MAX * DEV_BSIZE;
 
 void
 zio_init(void)
@@ -875,14 +901,108 @@ zio_ioctl(zio_t *pio, spa_t *spa, vdev_t *vd, int cmd,
 
 		zio->io_cmd = cmd;
 	} else {
-		zio = zio_null(pio, spa, NULL, NULL, NULL, flags);
-
-		for (c = 0; c < vd->vdev_children; c++)
-			zio_nowait(zio_ioctl(zio, spa, vd->vdev_child[c], cmd,
-			    done, private, flags));
+		zio = zio_null(pio, spa, vd, done, private, flags);
+		/*
+		 * DKIOCFREE ioctl's need some special handling on interior
+		 * vdevs. If the device provides an ops function to handle
+		 * recomputing dkioc_free extents, then we call it.
+		 * Otherwise the default behavior applies, which simply fans
+		 * out the ioctl to all component vdevs.
+		 */
+		if (cmd == DKIOCFREE &&
+		    vd->vdev_ops->vdev_op_trim != NULL) {
+			vd->vdev_ops->vdev_op_trim(vd, zio, private);
+		} else {
+			for (c = 0; c < vd->vdev_children; c++)
+				zio_nowait(zio_ioctl(zio, spa,
+				    vd->vdev_child[c], cmd, NULL,
+				    private, flags));
+		}
 	}
 
 	return (zio);
+}
+
+/*
+ * Callback for when a trim zio has completed. This simply frees the
+ * dkioc_free_list_t extent list of the DKIOCFREE ioctl.
+ */
+static void
+zio_trim_done(zio_t *zio)
+{
+	VERIFY(zio->io_private != NULL);
+	dfl_destroy(zio->io_private);
+}
+
+/*
+ * Takes a bunch of freed extents and tells the underlying vdevs that the
+ * space associated with these extents can be released.
+ * This is used by flash storage to pre-erase blocks for rapid reuse later
+ * and thin-provisioned block storage to reclaim unused blocks.
+ */
+zio_t *
+zio_trim(struct range_tree *tree, spa_t *spa, vdev_t *vd, zio_done_func_t *done,
+    void *private, enum zio_flag flags, int trim_flags)
+{
+	dkioc_free_list_t *dfl = NULL;
+	zio_t *pio = zio_root(spa, done, private, flags);
+
+	ASSERT(range_tree_space(tree) != 0);
+	/*
+	 * Don't actually perform any trims if the feature is disabled or
+	 * the device lacks support for it.
+	 */
+	if (!zfs_trim || vd->vdev_notrim)
+		return (pio);
+
+	/*
+	 * Trim commands have a limit on the number of extents in them, so we
+	 * may need to issue multiple trims in order to consume the tree.
+	 */
+	for (range_seg_t *rs = avl_first(&tree->rt_root); rs != NULL;
+	    rs = AVL_NEXT(&tree->rt_root, rs)) {
+		uint64_t ext_start = rs->rs_start;
+		uint64_t ext_length = rs->rs_end - rs->rs_start;
+
+		/*
+		 * Trim commands have a maximum extent length that can be
+		 * expressed, so we may need to split the range_seg.
+		 */
+		while (ext_length > 0) {
+			uint64_t len = MIN(ext_length,
+			    zfs_max_extent_size_per_trim_ext);
+
+			/* Start a new dkioc_free_list_t if necessary */
+			if (dfl == NULL)
+				dfl = dfl_new(KM_SLEEP, trim_flags);
+
+			dfl_append(dfl, ext_start, len);
+			ext_start += len;
+			ext_length -= len;
+
+			/*
+			 * Check number of extents per trim constraint and
+			 * issue the trim early if it has been reached.
+			 */
+			if (dfl->dfl_num_exts >= zfs_max_exts_per_trim ||
+			    dfl->dfl_num_exts == DFL_MAX_EXTENTS) {
+				zio_nowait(zio_ioctl(pio, spa, vd, DKIOCFREE,
+				    zio_trim_done, dfl, ZIO_FLAG_CANFAIL |
+				    ZIO_FLAG_DONT_PROPAGATE |
+				    ZIO_FLAG_DONT_RETRY));
+				dfl = NULL;
+			}
+		}
+	}
+
+	/* Issue the last trim command containing any remaining extents */
+	if (dfl != NULL) {
+		zio_nowait(zio_ioctl(pio, spa, vd, DKIOCFREE,
+		    zio_trim_done, dfl, ZIO_FLAG_CANFAIL |
+		    ZIO_FLAG_DONT_PROPAGATE | ZIO_FLAG_DONT_RETRY));
+	}
+
+	return (pio);
 }
 
 zio_t *

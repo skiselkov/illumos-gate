@@ -249,6 +249,8 @@ typedef void zio_done_func_t(zio_t *zio);
 
 extern const char *zio_type_name[ZIO_TYPES];
 
+struct range_tree;
+
 /*
  * A bookmark is a four-tuple <objset, object, level, blkid> that uniquely
  * identifies any block in the pool.  By convention, the meta-objset (MOS)
@@ -485,6 +487,10 @@ extern zio_t *zio_claim(zio_t *pio, spa_t *spa, uint64_t txg,
 
 extern zio_t *zio_ioctl(zio_t *pio, spa_t *spa, vdev_t *vd, int cmd,
     zio_done_func_t *done, void *private, enum zio_flag flags);
+
+extern zio_t *zio_trim(struct range_tree *tree, spa_t *spa, vdev_t *vd,
+    zio_done_func_t *done, void *private, enum zio_flag flags,
+    int dkiocfree_flags);
 
 extern zio_t *zio_read_phys(zio_t *pio, vdev_t *vd, uint64_t offset,
     uint64_t size, void *data, int checksum,
