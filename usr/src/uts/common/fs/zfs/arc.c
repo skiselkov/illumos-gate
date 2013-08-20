@@ -2519,21 +2519,31 @@ arc_get_data_buf(arc_buf_t *buf)
 
 	arc_adapt(size, state);
 
+top:
 	/*
 	 * We have not yet reached cache maximum size,
 	 * just allocate a new buffer.
 	 */
 	if (!arc_evict_needed(type)) {
 		if (type == ARC_BUFC_METADATA) {
-			buf->b_data = zio_buf_alloc(size);
-			arc_space_consume(size, ARC_SPACE_DATA);
+			buf->b_data = zio_buf_alloc_canfail(size);
+			if (buf->b_data != NULL) {
+				arc_space_consume(size, ARC_SPACE_DATA);
+				goto out;
+			}
 		} else {
 			ASSERT(type == ARC_BUFC_DATA);
-			buf->b_data = zio_data_buf_alloc(size);
-			ARCSTAT_INCR(arcstat_data_size, size);
-			atomic_add_64(&arc_size, size);
+			buf->b_data = zio_data_buf_alloc_canfail(size);
+			if (buf->b_data != NULL) {
+				ARCSTAT_INCR(arcstat_data_size, size);
+				atomic_add_64(&arc_size, size);
+				goto out;
+			}
 		}
-		goto out;
+		/*
+		 * Memory allocation failed probably due to excessive
+		 * fragmentation, we need to evict regardless.
+		 */
 	}
 
 	/*
@@ -2556,16 +2566,8 @@ arc_get_data_buf(arc_buf_t *buf)
 		    mfu_space > arc_mfu->arcs_size) ? arc_mru : arc_mfu;
 	}
 	if ((buf->b_data = arc_evict(state, NULL, size, TRUE, type)) == NULL) {
-		if (type == ARC_BUFC_METADATA) {
-			buf->b_data = zio_buf_alloc(size);
-			arc_space_consume(size, ARC_SPACE_DATA);
-		} else {
-			ASSERT(type == ARC_BUFC_DATA);
-			buf->b_data = zio_data_buf_alloc(size);
-			ARCSTAT_INCR(arcstat_data_size, size);
-			atomic_add_64(&arc_size, size);
-		}
 		ARCSTAT_BUMP(arcstat_recycle_miss);
+		goto top;
 	}
 	ASSERT(buf->b_data != NULL);
 out:
