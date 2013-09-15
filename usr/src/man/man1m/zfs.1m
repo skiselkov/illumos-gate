@@ -968,7 +968,7 @@ This property is not inherited.
 .ne 2
 .na
 \fB\fBchecksum\fR=\fBon\fR | \fBoff\fR | \fBfletcher2\fR | \fBfletcher4\fR |
-\fBsha256\fR | \fBnoparity\fR \fR
+\fBsha256\fR | \fBnoparity\fR | \fBsha512\fR | \fBskein\fR | \fBedonr\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -980,6 +980,10 @@ disables integrity but also disables maintaining parity for user data.  This
 setting is used internally by a dump device residing on a RAID-Z pool and should
 not be used by any other dataset. Disabling checksums is \fBNOT\fR a recommended
 practice.
+.sp
+The \fBsha512\fR, \fBskein\fR and \fBedonr\fR checksum algorithms require
+enabling the appropriate features on the pool. Please see
+\fBzpool-features(5)\fR for more information on these algorithms.
 .sp
 Changing this property affects only newly-written data.
 .RE
@@ -2994,7 +2998,7 @@ Generate a deduplicated stream.  Blocks which would have been sent multiple
 times in the send stream will only be sent once.  The receiving system must
 also support this feature to recieve a deduplicated stream.  This flag can
 be used regardless of the dataset's \fBdedup\fR property, but performance
-will be much better if the filesystem uses a dedup-capable checksum (eg.
+will be much better if the filesystem uses a dedup-capable checksum (e.g.
 \fBsha256\fR).
 .RE
 

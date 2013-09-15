@@ -181,6 +181,7 @@
 #include <sys/dsl_bookmark.h>
 #include <sys/dsl_userhold.h>
 #include <sys/zfeature.h>
+#include <sys/zio_checksum.h>
 
 #include "zfs_namecheck.h"
 #include "zfs_prop.h"
@@ -2454,6 +2455,43 @@ zfs_prop_set_special(const char *dsname, zprop_source_t source,
 		}
 		break;
 	}
+	case ZFS_PROP_CHECKSUM:
+	case ZFS_PROP_DEDUP:
+	{
+		zfeature_info_t	*feature = NULL;
+		spa_t		*spa;
+
+		if (intval == ZIO_CHECKSUM_SHA512)
+			feature = &spa_feature_table[SPA_FEATURE_SHA512];
+		else if (intval == ZIO_CHECKSUM_SKEIN)
+			feature = &spa_feature_table[SPA_FEATURE_SKEIN];
+		else if (intval == ZIO_CHECKSUM_EDONR)
+			feature = &spa_feature_table[SPA_FEATURE_EDONR];
+		if (feature == NULL) {
+			/* No features need to be activated for this cksum */
+			err = -1;
+			break;
+		}
+		if ((err = spa_open(dsname, &spa, FTAG)) != 0)
+			return (err);
+		if (!spa_feature_is_active(spa, feature)) {
+			/* Salted checksums must store the salt in the MOS */
+			if (zio_checksum_table[intval].ci_salted)
+				err = spa_activate_salted_cksum(spa, feature);
+			else
+				err = zfs_prop_activate_feature(spa, feature);
+		}
+		spa_close(spa, FTAG);
+		if (err == 0) {
+			/*
+			 * We want the default set action to be performed in
+			 * the caller, we only perform feature checks here.
+			 */
+			err = -1;
+		}
+		break;
+	}
+
 	default:
 		err = -1;
 	}
@@ -3818,11 +3856,6 @@ zfs_check_settable(const char *dsname, nvpair_t *pair, cred_t *cr)
 			return (SET_ERROR(ENOTSUP));
 		break;
 
-	case ZFS_PROP_DEDUP:
-		if (zfs_earlier_version(dsname, SPA_VERSION_DEDUP))
-			return (SET_ERROR(ENOTSUP));
-		break;
-
 	case ZFS_PROP_RECORDSIZE:
 		/* Record sizes above 128k need the feature to be enabled */
 		if (nvpair_value_uint64(pair, &intval) == 0 &&
@@ -3873,6 +3906,49 @@ zfs_check_settable(const char *dsname, nvpair_t *pair, cred_t *cr)
 				return (SET_ERROR(ENOTSUP));
 		}
 		break;
+
+	case ZFS_PROP_CHECKSUM:
+	case ZFS_PROP_DEDUP: {
+		zfeature_info_t *feature = NULL;
+
+		/* dedup feature version checks */
+		if (prop == ZFS_PROP_DEDUP &&
+		    zfs_earlier_version(dsname, SPA_VERSION_DEDUP))
+			return (SET_ERROR(ENOTSUP));
+
+		if (nvpair_value_uint64(pair, &intval) != 0)
+			return (SET_ERROR(EINVAL));
+
+		/* check prop value is enabled in features */
+		if (intval == ZIO_CHECKSUM_SHA512)
+			feature = &spa_feature_table[SPA_FEATURE_SHA512];
+		else if (intval == ZIO_CHECKSUM_SKEIN)
+			feature = &spa_feature_table[SPA_FEATURE_SKEIN];
+		else if (intval == ZIO_CHECKSUM_EDONR)
+			feature = &spa_feature_table[SPA_FEATURE_EDONR];
+
+		if (feature != NULL) {
+			spa_t *spa;
+
+			if ((err = spa_open(dsname, &spa, FTAG)) != 0)
+				return (err);
+			/*
+			 * Salted checksums are not supported on root pools.
+			 */
+			if (spa_bootfs(spa) != 0 &&
+			    intval < ZIO_CHECKSUM_FUNCTIONS &&
+			    zio_checksum_table[intval].ci_salted != 0) {
+				spa_close(spa, FTAG);
+				return (SET_ERROR(ERANGE));
+			}
+			if (!spa_feature_is_enabled(spa, feature)) {
+				spa_close(spa, FTAG);
+				return (SET_ERROR(ENOTSUP));
+			}
+			spa_close(spa, FTAG);
+		}
+		break;
+	}
 	}
 
 	return (zfs_secpolicy_setprop(dsname, prop, pair, CRED()));

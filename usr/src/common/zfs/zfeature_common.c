@@ -231,4 +231,14 @@ zpool_feature_init(void)
 	    "org.open-zfs:large_blocks", "large_blocks",
 	    "Support for blocks larger than 128KB.", B_FALSE, B_FALSE, B_FALSE,
 	    large_blocks_deps);
+
+	zfeature_register(SPA_FEATURE_SHA512,
+	    "org.illumos:sha512", "sha512",
+	    "SHA-512/256 truncated hash algorithm.", B_FALSE, B_FALSE, NULL);
+	zfeature_register(SPA_FEATURE_SKEIN,
+	    "org.illumos:skein", "skein",
+	    "Skein hash algorithm.", B_FALSE, B_FALSE, NULL);
+	zfeature_register(SPA_FEATURE_EDONR,
+	    "org.illumos:edonr", "edonr",
+	    "Edon-R hash algorithm.", B_FALSE, B_FALSE, NULL);
 }

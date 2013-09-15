@@ -23,6 +23,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011, 2014 by Delphix. All rights reserved.
  * Copyright (c) 2013, 2014, Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2013 Saso Kiselkov. All rights reserved.
  */
 
 /*
@@ -2493,6 +2494,25 @@ spa_load_impl(spa_t *spa, uint64_t pool_guid, nvlist_t *config,
 		return (spa_load(spa, state, SPA_IMPORT_EXISTING, B_TRUE));
 	}
 
+	/* Grab the secret checksum salt from the MOS. */
+	if (spa_dir_prop(spa, DMU_POOL_CHECKSUM_SALT,
+	    &spa->spa_cksum_salt_obj) == 0) {
+		if (zap_lookup(spa->spa_meta_objset, spa->spa_cksum_salt_obj,
+		    DMU_POOL_CHECKSUM_SALT, 1,
+		    sizeof (spa->spa_cksum_salt.zcs_bytes),
+		    spa->spa_cksum_salt.zcs_bytes) != 0) {
+			/*
+			 * MOS format is broken, the salt object is there but
+			 * is missing the actual salt value.
+			 */
+			return (spa_vdev_err(rvd, VDEV_AUX_CORRUPT_DATA, EIO));
+		}
+	} else {
+		/* Generate a new salt for subsequent use */
+		(void) random_get_pseudo_bytes(spa->spa_cksum_salt.zcs_bytes,
+		    sizeof (spa->spa_cksum_salt.zcs_bytes));
+	}
+
 	if (spa_dir_prop(spa, DMU_POOL_SYNC_BPOBJ, &obj) != 0)
 		return (spa_vdev_err(rvd, VDEV_AUX_CORRUPT_DATA, EIO));
 	error = bpobj_open(&spa->spa_deferred_bpobj, spa->spa_meta_objset, obj);
@@ -3644,6 +3664,15 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 	 */
 	if (version >= SPA_VERSION_ZPOOL_HISTORY)
 		spa_history_create_obj(spa, tx);
+
+	/*
+	 * Generate some random noise for salted checksums to operate on. As
+	 * soon as a salted checksum is used for the first time we will
+	 * generate the persistent MOS object to hold the salt (see
+	 * spa_activate_salted_cksum).
+	 */
+	(void) random_get_pseudo_bytes(spa->spa_cksum_salt.zcs_bytes,
+	    sizeof (spa->spa_cksum_salt.zcs_bytes));
 
 	/*
 	 * Set pool properties.

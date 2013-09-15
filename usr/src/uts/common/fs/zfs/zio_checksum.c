@@ -22,10 +22,12 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2013 by Delphix. All rights reserved.
  * Copyright (c) 2013, Joyent, Inc. All rights reserved.
+ * Copyright 2013 Saso Kiselkov. All rights reserved.
  */
 
 #include <sys/zfs_context.h>
 #include <sys/spa.h>
+#include <sys/spa_impl.h>
 #include <sys/zio.h>
 #include <sys/zio_checksum.h>
 #include <sys/zil.h>
@@ -59,27 +61,72 @@
  * checksum function of the appropriate strength.  When reading a block,
  * we compare the expected checksum against the actual checksum, which we
  * compute via the checksum function specified by BP_GET_CHECKSUM(bp).
+ *
+ * SALTED CHECKSUMS
+ *
+ * To enable the use of non-cryptographically secure hash algorithms in
+ * dedup we introduce the notion of salted checksums (MACs, really). A salted
+ * checksum is fed both a random 256-bit value (the salt) and the data to be
+ * checksummed. This salt is kept secret (stored on the pool, but never shown
+ * to the user), thus even if an attacker knew of collision weaknesses in the
+ * hash algorithm, they won't be able to mount a known plaintext attack on
+ * the DDT, since the actual hash value cannot be known ahead of time. How
+ * the salt is used is algorithm-specific (some might simply prefix it to the
+ * data block, others might need to utilize a full-blown HMAC). On disk the
+ * salt is stored in a ZAP object in the MOS (DMU_POOL_CHECKSUM_SALT).
+ *
+ * CONTEXT TEMPLATES
+ *
+ * Some hashing algorithms need to perform a substantial amount of
+ * initialization work (e.g. salted checksums above may need to pre-hash the
+ * salt) before being able to process data. Performing this redundant work
+ * for each block would be very wasteful, so we instead allow a checksum
+ * algorithm to do the work once (the first time it's used) and then keep
+ * this pre-initialized context as a template inside the spa_t
+ * (spa_cksum_tmpls). If the zio_checksum_info_t contains non-NULL
+ * ci_tmpl_init and ci_tmpl_free callbacks, they are used to construct and
+ * destruct the pre-initialized checksum context. The pre-initialized
+ * context is then reused during each checksum invocation and passed to the
+ * checksum function.
  */
 
 /*ARGSUSED*/
 static void
-zio_checksum_off(const void *buf, uint64_t size, zio_cksum_t *zcp)
+zio_checksum_off(const void *buf, uint64_t size, const zio_cksum_salt_t *salt,
+    const void *ctx_template, zio_cksum_t *zcp)
 {
 	ZIO_SET_CHECKSUM(zcp, 0, 0, 0, 0);
 }
 
 zio_checksum_info_t zio_checksum_table[ZIO_CHECKSUM_FUNCTIONS] = {
-	{{NULL,			NULL},			0, 0, 0, "inherit"},
-	{{NULL,			NULL},			0, 0, 0, "on"},
-	{{zio_checksum_off,	zio_checksum_off},	0, 0, 0, "off"},
-	{{zio_checksum_SHA256,	zio_checksum_SHA256},	1, 1, 0, "label"},
-	{{zio_checksum_SHA256,	zio_checksum_SHA256},	1, 1, 0, "gang_header"},
-	{{fletcher_2_native,	fletcher_2_byteswap},	0, 1, 0, "zilog"},
-	{{fletcher_2_native,	fletcher_2_byteswap},	0, 0, 0, "fletcher2"},
-	{{fletcher_4_native,	fletcher_4_byteswap},	1, 0, 0, "fletcher4"},
-	{{zio_checksum_SHA256,	zio_checksum_SHA256},	1, 0, 1, "sha256"},
-	{{fletcher_4_native,	fletcher_4_byteswap},	0, 1, 0, "zilog2"},
-	{{zio_checksum_off,	zio_checksum_off},	0, 0, 0, "noparity"},
+	{{NULL, NULL}, NULL, NULL, 0, 0, 0, 0, "inherit"},
+	{{NULL, NULL}, NULL, NULL, 0, 0, 0, 0, "on"},
+	{{zio_checksum_off,		zio_checksum_off},
+	    NULL, NULL, 0, 0, 0, 0, "off"},
+	{{zio_checksum_SHA256,		zio_checksum_SHA256},
+	    NULL, NULL, 1, 1, 0, 0, "label"},
+	{{zio_checksum_SHA256,		zio_checksum_SHA256},
+	    NULL, NULL, 1, 1, 0, 0, "gang_header"},
+	{{fletcher_2_native,		fletcher_2_byteswap},
+	    NULL, NULL, 0, 1, 0, 0, "zilog"},
+	{{fletcher_2_native,		fletcher_2_byteswap},
+	    NULL, NULL, 0, 0, 0, 0, "fletcher2"},
+	{{fletcher_4_native,		fletcher_4_byteswap},
+	    NULL, NULL, 1, 0, 0, 0, "fletcher4"},
+	{{zio_checksum_SHA256,		zio_checksum_SHA256},
+	    NULL, NULL, 1, 0, 1, 0, "sha256"},
+	{{fletcher_4_native,		fletcher_4_byteswap},
+	    NULL, NULL, 0, 1, 0, 0, "zilog2"},
+	{{zio_checksum_off,		zio_checksum_off},
+	    NULL, NULL, 0, 0, 0, 0, "noparity"},
+	{{zio_checksum_SHA512_native, zio_checksum_SHA512_byteswap},
+	    NULL, NULL, 1, 0, 1, 0, "sha512"},
+	{{zio_checksum_skein_native,	zio_checksum_skein_byteswap},
+	    zio_checksum_skein_tmpl_init, zio_checksum_skein_tmpl_free,
+	    1, 0, 1, 1, "skein"},
+	{{zio_checksum_edonr_native,	zio_checksum_edonr_byteswap},
+	    zio_checksum_edonr_tmpl_init, zio_checksum_edonr_tmpl_free,
+	    1, 0, 1, 1, "edonr"}
 };
 
 enum zio_checksum
@@ -148,6 +195,25 @@ zio_checksum_label_verifier(zio_cksum_t *zcp, uint64_t offset)
 }
 
 /*
+ * Calls the template init function of a checksum which supports context
+ * templates and installs the template into the spa_t.
+ */
+static void
+zio_checksum_template_init(enum zio_checksum checksum, spa_t *spa)
+{
+	zio_checksum_info_t *ci = &zio_checksum_table[checksum];
+
+	VERIFY(ci->ci_tmpl_init != NULL && ci->ci_tmpl_free != NULL);
+	mutex_enter(&spa->spa_cksum_tmpls_lock);
+	if (spa->spa_cksum_tmpls[checksum] == NULL) {
+		spa->spa_cksum_tmpls[checksum] =
+		    ci->ci_tmpl_init(&spa->spa_cksum_salt);
+		VERIFY(spa->spa_cksum_tmpls[checksum] != NULL);
+	}
+	mutex_exit(&spa->spa_cksum_tmpls_lock);
+}
+
+/*
  * Generate the checksum.
  */
 void
@@ -158,9 +224,13 @@ zio_checksum_compute(zio_t *zio, enum zio_checksum checksum,
 	uint64_t offset = zio->io_offset;
 	zio_checksum_info_t *ci = &zio_checksum_table[checksum];
 	zio_cksum_t cksum;
+	spa_t *spa = zio->io_spa;
 
 	ASSERT((uint_t)checksum < ZIO_CHECKSUM_FUNCTIONS);
 	ASSERT(ci->ci_func[0] != NULL);
+
+	if (ci->ci_tmpl_init != NULL && spa->spa_cksum_tmpls[checksum] == NULL)
+		zio_checksum_template_init(checksum, spa);
 
 	if (ci->ci_eck) {
 		zio_eck_t *eck;
@@ -181,10 +251,12 @@ zio_checksum_compute(zio_t *zio, enum zio_checksum checksum,
 		else
 			bp->blk_cksum = eck->zec_cksum;
 		eck->zec_magic = ZEC_MAGIC;
-		ci->ci_func[0](data, size, &cksum);
+		ci->ci_func[0](data, size, &spa->spa_cksum_salt,
+		    spa->spa_cksum_tmpls[checksum], &cksum);
 		eck->zec_cksum = cksum;
 	} else {
-		ci->ci_func[0](data, size, &bp->blk_cksum);
+		ci->ci_func[0](data, size, &spa->spa_cksum_salt,
+		    spa->spa_cksum_tmpls[checksum], &bp->blk_cksum);
 	}
 }
 
@@ -202,9 +274,13 @@ zio_checksum_error(zio_t *zio, zio_bad_cksum_t *info)
 	void *data = zio->io_data;
 	zio_checksum_info_t *ci = &zio_checksum_table[checksum];
 	zio_cksum_t actual_cksum, expected_cksum, verifier;
+	spa_t *spa = zio->io_spa;
 
 	if (checksum >= ZIO_CHECKSUM_FUNCTIONS || ci->ci_func[0] == NULL)
 		return (SET_ERROR(EINVAL));
+
+	if (ci->ci_tmpl_init != NULL && spa->spa_cksum_tmpls[checksum] == NULL)
+		zio_checksum_template_init(checksum, spa);
 
 	if (ci->ci_eck) {
 		zio_eck_t *eck;
@@ -243,7 +319,8 @@ zio_checksum_error(zio_t *zio, zio_bad_cksum_t *info)
 
 		expected_cksum = eck->zec_cksum;
 		eck->zec_cksum = verifier;
-		ci->ci_func[byteswap](data, size, &actual_cksum);
+		ci->ci_func[byteswap](data, size, &spa->spa_cksum_salt,
+		    spa->spa_cksum_tmpls[checksum], &actual_cksum);
 		eck->zec_cksum = expected_cksum;
 
 		if (byteswap)
@@ -253,7 +330,8 @@ zio_checksum_error(zio_t *zio, zio_bad_cksum_t *info)
 		ASSERT(!BP_IS_GANG(bp));
 		byteswap = BP_SHOULD_BYTESWAP(bp);
 		expected_cksum = bp->blk_cksum;
-		ci->ci_func[byteswap](data, size, &actual_cksum);
+		ci->ci_func[byteswap](data, size, &spa->spa_cksum_salt,
+		    spa->spa_cksum_tmpls[checksum], &actual_cksum);
 	}
 
 	info->zbc_expected = expected_cksum;
@@ -274,4 +352,23 @@ zio_checksum_error(zio_t *zio, zio_bad_cksum_t *info)
 	}
 
 	return (0);
+}
+
+/*
+ * Called by a spa_t that's about to be deallocated. This steps through
+ * all of the checksum context templates and deallocates any that were
+ * initialized using the algorithm-specific template init function.
+ */
+void
+zio_checksum_templates_free(spa_t *spa)
+{
+	for (int checksum = 0; checksum < ZIO_CHECKSUM_FUNCTIONS; checksum++) {
+		if (spa->spa_cksum_tmpls[checksum] != NULL) {
+			zio_checksum_info_t *ci = &zio_checksum_table[checksum];
+
+			VERIFY(ci->ci_tmpl_free != NULL);
+			ci->ci_tmpl_free(spa->spa_cksum_tmpls[checksum]);
+			spa->spa_cksum_tmpls[checksum] = NULL;
+		}
+	}
 }

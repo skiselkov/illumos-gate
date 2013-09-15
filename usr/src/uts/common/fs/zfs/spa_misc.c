@@ -22,6 +22,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011, 2014 by Delphix. All rights reserved.
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2013 Saso Kiselkov. All rights reserved.
  */
 
 #include <sys/zfs_context.h>
@@ -49,7 +50,7 @@
 #include <sys/arc.h>
 #include <sys/ddt.h>
 #include "zfs_prop.h"
-#include "zfeature_common.h"
+#include <sys/zfeature.h>
 
 /*
  * SPA locking
@@ -554,6 +555,7 @@ spa_add(const char *name, nvlist_t *config, const char *altroot)
 	mutex_init(&spa->spa_history_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_proc_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_props_lock, NULL, MUTEX_DEFAULT, NULL);
+	mutex_init(&spa->spa_cksum_tmpls_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_scrub_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_suspend_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_vdev_top_lock, NULL, MUTEX_DEFAULT, NULL);
@@ -709,6 +711,8 @@ spa_remove(spa_t *spa)
 	for (int t = 0; t < TXG_SIZE; t++)
 		bplist_destroy(&spa->spa_free_bplist[t]);
 
+	zio_checksum_templates_free(spa);
+
 	cv_destroy(&spa->spa_async_cv);
 	cv_destroy(&spa->spa_proc_cv);
 	cv_destroy(&spa->spa_scrub_io_cv);
@@ -720,6 +724,7 @@ spa_remove(spa_t *spa)
 	mutex_destroy(&spa->spa_history_lock);
 	mutex_destroy(&spa->spa_proc_lock);
 	mutex_destroy(&spa->spa_props_lock);
+	mutex_destroy(&spa->spa_cksum_tmpls_lock);
 	mutex_destroy(&spa->spa_scrub_lock);
 	mutex_destroy(&spa->spa_suspend_lock);
 	mutex_destroy(&spa->spa_vdev_top_lock);
@@ -1884,6 +1889,63 @@ boolean_t
 spa_has_pending_synctask(spa_t *spa)
 {
 	return (!txg_all_lists_empty(&spa->spa_dsl_pool->dp_sync_tasks));
+}
+
+static int
+activate_salted_cksum_check(zfeature_info_t *feature, dmu_tx_t *tx)
+{
+	spa_t	*spa = dmu_tx_pool(tx)->dp_spa;
+
+	if (!spa_feature_is_active(spa, feature))
+		return (0);
+	else
+		return (SET_ERROR(EBUSY));
+}
+
+static void
+activate_salted_cksum_sync(zfeature_info_t *feature, dmu_tx_t *tx)
+{
+	spa_t	*spa = dmu_tx_pool(tx)->dp_spa;
+
+	spa_feature_incr(spa, feature, tx);
+	/*
+	 * This is the first salted checksum that's been activated, so
+	 * create the persistent checksum salt object now.
+	 */
+	if (spa->spa_cksum_salt_obj == 0) {
+		spa->spa_cksum_salt_obj = zap_create_link(spa->spa_meta_objset,
+		    DMU_OTN_ZAP_METADATA, DMU_POOL_DIRECTORY_OBJECT,
+		    DMU_POOL_CHECKSUM_SALT, tx);
+		VERIFY3U(zap_add(spa->spa_meta_objset,
+		    spa->spa_cksum_salt_obj, DMU_POOL_CHECKSUM_SALT, 1,
+		    sizeof (spa->spa_cksum_salt.zcs_bytes),
+		    spa->spa_cksum_salt.zcs_bytes, tx), ==, 0);
+	}
+}
+
+/*
+ * Activates a feature associated with a salted checksum. You must call this
+ * function instead of calling spa_feature_incr() directly, because we may
+ * also need to sync the MOS object holding the checksum salt.
+ * Arguments:
+ *	spa	Pool on which to activate the salted checksum feature.
+ *	feature	Salted checksum algorithm feature to activate (see
+ *		spa_feature_table).
+ */
+int
+spa_activate_salted_cksum(spa_t *spa, struct zfeature_info *feature)
+{
+	int err;
+
+	/* EBUSY here indicates that the feature is already active */
+	err = dsl_sync_task(spa_name(spa),
+	    (dsl_checkfunc_t *)activate_salted_cksum_check,
+	    (dsl_syncfunc_t *)activate_salted_cksum_sync, feature, 2);
+
+	if (err != 0 && err != EBUSY)
+		return (err);
+	else
+		return (0);
 }
 
 int

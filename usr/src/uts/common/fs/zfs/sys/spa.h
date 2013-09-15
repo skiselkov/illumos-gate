@@ -22,6 +22,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011, 2014 by Delphix. All rights reserved.
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2013 Saso Kiselkov. All rights reserved.
  */
 
 #ifndef _SYS_SPA_H
@@ -53,6 +54,7 @@ typedef struct ddt ddt_t;
 typedef struct ddt_entry ddt_entry_t;
 struct dsl_pool;
 struct dsl_dataset;
+struct zfeature_info;
 
 /*
  * General-purpose 32-bit and 64-bit bitfield encodings.
@@ -144,6 +146,14 @@ typedef struct dva {
 typedef struct zio_cksum {
 	uint64_t	zc_word[4];
 } zio_cksum_t;
+
+/*
+ * Some checksums/hashes need a 256-bit initialization salt. This salt is kept
+ * secret and is suitable for use in MAC algorithms as the key.
+ */
+typedef struct zio_cksum_salt {
+	uint8_t		zcs_bytes[32];
+} zio_cksum_salt_t;
 
 /*
  * Each block is described by its DVAs, time of birth, checksum, etc.
@@ -791,6 +801,9 @@ extern boolean_t spa_is_root(spa_t *spa);
 extern boolean_t spa_writeable(spa_t *spa);
 extern boolean_t spa_has_pending_synctask(spa_t *spa);
 extern int spa_maxblocksize(spa_t *spa);
+
+/* Salted checksum handling */
+extern int spa_activate_salted_cksum(spa_t *spa, struct zfeature_info *feature);
 
 extern int spa_mode(spa_t *spa);
 extern uint64_t strtonum(const char *str, char **nptr);
