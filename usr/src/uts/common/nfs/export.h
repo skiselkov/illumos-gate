@@ -456,7 +456,12 @@ struct exportinfo {
 	struct exp_hash		fid_hash;
 	struct exp_hash		path_hash;
 	struct treenode		*exi_tree;
-	fhandle_t		exi_fh;
+	/*LINTED E_ANONYMOUS_UNION_DECL*/
+	union {
+		fhandle_t	exi_fh;
+		fhandle3_t	exi_fh3;
+	};
+	boolean_t		exi_long_handle;
 	krwlock_t		exi_cache_lock;
 	kmutex_t		exi_lock;
 	uint_t			exi_count;
@@ -602,6 +607,10 @@ extern struct exportinfo *exi_public, *exi_root;
 extern fhandle_t nullfh2;	/* for comparing V2 filehandles */
 extern krwlock_t exported_lock;
 extern struct exportinfo *exptable[];
+/*
+ * Auxiliary functions for version-dependent file handle manipulation.
+ */
+extern int nfs_setup_exi_fh(struct exportinfo *exi, fid_t *fidp, fsid_t fsid);
 
 /*
  * Two macros for identifying public filehandles.

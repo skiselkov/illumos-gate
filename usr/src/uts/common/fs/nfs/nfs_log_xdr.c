@@ -219,7 +219,10 @@ xdr_nfslog_sharefsargs(XDR *xdrs, struct exportinfo *objp)
 		return (FALSE);
 	if (!xdr_string(xdrs, &objp->exi_export.ex_path, ~0))
 		return (FALSE);
-	return (xdr_fhandle(xdrs, &objp->exi_fh));
+	if (objp->exi_long_handle)
+		return (xdr_fhandle3(xdrs, &objp->exi_fh3));
+	else
+		return (xdr_fhandle(xdrs, &objp->exi_fh));
 }
 
 bool_t

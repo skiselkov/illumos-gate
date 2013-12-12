@@ -42,6 +42,7 @@
 #include <sys/systm.h>
 #include <sys/cmn_err.h>
 #include <sys/policy.h>
+#include <sys/sdt.h>
 #include <sys/tsol/label.h>
 #include "fs/fs_subr.h"
 
@@ -520,20 +521,55 @@ lo_sync(struct vfs *vfsp,
 
 /*
  * Obtain the vnode from the underlying filesystem.
+ * Decodes our modified fid to find out which underlying filesystem to
+ * actually query for the real fid. See lo_fid for details.
  */
 static int
 lo_vget(struct vfs *vfsp, struct vnode **vpp, struct fid *fidp)
 {
-	vnode_t *realrootvp;
+	fsid_t		fsid;
+	vfs_t		*origvfsp;
+	struct fid	realfid;
+	vnode_t		*realvp;
+	int		err;
 
-#ifdef LODEBUG
-	lo_dprint(4, "lo_vget: %p\n", vfsp);
-#endif
-	(void) lo_realvfs(vfsp, &realrootvp);
-	if (realrootvp != NULL)
-		return (VFS_VGET(realrootvp->v_vfsp, vpp, fidp));
-	else
-		return (EIO);
+	if (fidp->fid_len <= sizeof (fsid_t))
+		return SET_ERROR(EINVAL);
+	bcopy(fidp->fid_data, &fsid, sizeof (fsid));
+	bzero(&realfid, sizeof (realfid));
+	realfid.fid_len = fidp->fid_len - sizeof (fsid_t);
+	bcopy(fidp->fid_data + sizeof (fsid_t), realfid.fid_data,
+	    realfid.fid_len);
+	if ((origvfsp = getvfs(&fsid)) == NULL)
+		return SET_ERROR(EIO);
+	/*
+	 * If the filesystem found is not our realvfs, perform an extra
+	 * check to make sure nobody's trying to get at a filesystem
+	 * outside of our scope by forging fsid's.
+	 */
+	if (origvfsp != lo_realvfs(vfsp, NULL)) {
+		const char *lo_resource, *realfs_mntpt;
+
+		lo_resource = refstr_value(vfsp->vfs_resource);
+		realfs_mntpt = refstr_value(origvfsp->vfs_mntpt);
+		/*
+		 * Our resource path should be a prefix of the mountpoint
+		 * of the original vfs.
+		 */
+		if (strlen(realfs_mntpt) <= strlen(lo_resource) ||
+		    bcmp(realfs_mntpt, lo_resource, strlen(lo_resource)))
+			return SET_ERROR(EACCES);
+	}
+	/*
+	 * Grab the real vnode a return lofs placeholder vnode for it.
+	 * This makes sure that all further calls to it pass through us.
+	 */
+	if ((err = VFS_VGET(origvfsp, &realvp, &realfid)) != 0)
+		return (err);
+	*vpp = makelonode(realvp, vtoli(vfsp), 0);
+	if (*vpp == NULL)
+		return SET_ERROR(ENOENT);
+	return (0);
 }
 
 /*

@@ -37,6 +37,7 @@
 #include <sys/debug.h>
 #include <sys/fs/lofs_node.h>
 #include <sys/fs/lofs_info.h>
+#include <sys/sdt.h>
 #include <fs/fs_subr.h>
 #include <vm/as.h>
 #include <vm/seg.h>
@@ -235,15 +236,44 @@ lo_inactive(vnode_t *vp, struct cred *cr, caller_context_t *ct)
 	freelonode(vtol(vp));
 }
 
+/*
+ * This returns a modified fid instead of the direct underlying filesystem
+ * fid. The reason is that given that we can have multiple subfilesystems
+ * mounted underneath our device point, we need some method of associating
+ * the retrieved fid with the original vfs from which it came. That way we
+ * then know which vfs to ask for a vnode in lo_vget.
+ *
+ * One known limitation of this is that we must store the fsid_t of the
+ * originating vfs in the initial portion of the fid, increasing its size
+ * by 8 bytes. This can be an issue for protocols which have limited file
+ * handle sizes, such as NFSv2. NFSv3 and above clients shouldn't be
+ * affected by this, as most filesystems return a 12-byte fid (which even
+ * with our 8-byte header fits in the 22-byte limit), with one notable
+ * exception being zfid_long_t from ZFS' .zfs/snapshot directory (which
+ * thus cannot be served over NFS from a lofs mount).
+ */
 /* ARGSUSED */
 static int
 lo_fid(vnode_t *vp, struct fid *fidp, caller_context_t *ct)
 {
+	fid_t realfid = *fidp;
+	int err;
+
 #ifdef LODEBUG
 	lo_dprint(4, "lo_fid %p, realvp %p\n", vp, realvp(vp));
 #endif
+	/* prepend the fsid to the original fid data */
 	vp = realvp(vp);
-	return (VOP_FID(vp, fidp, ct));
+	if ((err = VOP_FID(vp, &realfid, ct)) != 0)
+		return (err);
+	if (realfid.fid_len + sizeof (fsid_t) > MAXFIDSZ)
+		return SET_ERROR(EIO);
+	fidp->fid_len = realfid.fid_len + sizeof (fsid_t);
+	bcopy(&vp->v_vfsp->vfs_fsid, fidp->fid_data, sizeof (fsid_t));
+	bcopy(realfid.fid_data, fidp->fid_data + sizeof (fsid_t),
+	    realfid.fid_len);
+
+	return (0);
 }
 
 /*

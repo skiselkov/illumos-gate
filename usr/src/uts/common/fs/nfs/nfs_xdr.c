@@ -101,6 +101,31 @@ xdr_fhandle(XDR *xdrs, fhandle_t *fh)
 }
 
 bool_t
+xdr_fhandle3(XDR *xdrs, fhandle3_t *fh)
+{
+	int32_t *ptr;
+	int32_t *fhp;
+
+	if (xdrs->x_op == XDR_FREE)
+		return (TRUE);
+
+	ptr = XDR_INLINE(xdrs, RNDUP(sizeof (*fh)));
+	if (ptr != NULL) {
+		fhp = (int32_t *)fh;
+		if (xdrs->x_op == XDR_DECODE) {
+			for (int i = 0; i < sizeof (*fh) / sizeof (*ptr); i++)
+				*fhp++ = *ptr++;
+		} else {
+			for (int i = 0; i < sizeof (*fh) / sizeof (*ptr); i++)
+				*ptr++ = *fhp++;
+		}
+		return (TRUE);
+	}
+
+	return (xdr_opaque(xdrs, (caddr_t)fh, NFS_FH3SIZE));
+}
+
+bool_t
 xdr_fastfhandle(XDR *xdrs, fhandle_t **fh)
 {
 	int32_t *ptr;

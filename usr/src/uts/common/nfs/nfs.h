@@ -380,6 +380,7 @@ extern bool_t		nfs_allow_preepoch_time;
  * Size of an fhandle in bytes
  */
 #define	NFS_FHSIZE	32
+#define	NFS_FH3SIZE	64
 
 struct nfs_fid {
 	ushort_t nf_len;

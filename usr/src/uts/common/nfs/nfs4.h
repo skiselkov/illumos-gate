@@ -1019,13 +1019,22 @@ typedef struct nfs_fh4_fmt nfs_fh4_fmt_t;
  * NOTE: The macro expects the space to be  pre-allocated for
  * the contents of nfs_fh4_fmt_t.
  */
-#define	FH_TO_FMT4(exifh, nfs_fmt) {				\
-	bzero((nfs_fmt), NFS_FH4_LEN);				\
-	(nfs_fmt)->fh4_fsid = (exifh)->fh_fsid;			\
-	(nfs_fmt)->fh4_xlen = (exifh)->fh_xlen;			\
-	bcopy((exifh)->fh_xdata, (nfs_fmt)->fh4_xdata,		\
-	    (exifh)->fh_xlen);					\
-}
+#define	EXI_FH_TO_FMT4(exi, nfs_fmt)					\
+do {									\
+	bzero((nfs_fmt), NFS_FH4_LEN);					\
+	if ((exi)->exi_long_handle) {					\
+		(nfs_fmt)->fh4_fsid = (exi)->exi_fh3._fh3_fsid;		\
+		(nfs_fmt)->fh4_xlen = (exi)->exi_fh3._fh3_xlen;		\
+		bcopy((exi)->exi_fh3._fh3_xdata, (nfs_fmt)->fh4_xdata,	\
+		    (exi)->exi_fh3._fh3_xlen);				\
+	} else {							\
+		(nfs_fmt)->fh4_fsid = (exi)->exi_fh.fh_fsid;		\
+		(nfs_fmt)->fh4_xlen = (exi)->exi_fh.fh_xlen;		\
+		bcopy((exi)->exi_fh.fh_xdata, (nfs_fmt)->fh4_xdata,	\
+		    (exi)->exi_fh.fh_xlen);				\
+	}								\
+	_NOTE(CONSTCOND)						\
+} while (0)
 
 /*
  * A few definitions of repeatedly used constructs for nfsv4

@@ -3851,20 +3851,16 @@ rfs4_lo_state_walk_callout(rfs4_entry_t u_entry, void *e)
 {
 	rfs4_lo_state_t *lsp = (rfs4_lo_state_t *)u_entry;
 	struct exportinfo *exi = (struct exportinfo *)e;
-	nfs_fh4_fmt_t   fhfmt4, *exi_fhp, *finfo_fhp;
-	fhandle_t *efhp;
+	nfs_fh4_fmt_t fhfmt4, *finfo_fhp;
 
-	efhp = (fhandle_t *)&exi->exi_fh;
-	exi_fhp = (nfs_fh4_fmt_t *)&fhfmt4;
-
-	FH_TO_FMT4(efhp, exi_fhp);
+	EXI_FH_TO_FMT4(exi, &fhfmt4);
 
 	finfo_fhp = (nfs_fh4_fmt_t *)lsp->rls_state->rs_finfo->
 	    rf_filehandle.nfs_fh4_val;
 
-	if (EQFSID(&finfo_fhp->fh4_fsid, &exi_fhp->fh4_fsid) &&
-	    bcmp(&finfo_fhp->fh4_xdata, &exi_fhp->fh4_xdata,
-	    exi_fhp->fh4_xlen) == 0) {
+	if (EQFSID(&finfo_fhp->fh4_fsid, &fhfmt4.fh4_fsid) &&
+	    bcmp(finfo_fhp->fh4_xdata, fhfmt4.fh4_xdata,
+	    fhfmt4.fh4_xlen) == 0) {
 		rfs4_state_close(lsp->rls_state, FALSE, FALSE, CRED());
 		rfs4_dbe_invalidate(lsp->rls_dbe);
 		rfs4_dbe_invalidate(lsp->rls_state->rs_dbe);
@@ -3885,20 +3881,16 @@ rfs4_state_walk_callout(rfs4_entry_t u_entry, void *e)
 {
 	rfs4_state_t *sp = (rfs4_state_t *)u_entry;
 	struct exportinfo *exi = (struct exportinfo *)e;
-	nfs_fh4_fmt_t   fhfmt4, *exi_fhp, *finfo_fhp;
-	fhandle_t *efhp;
+	nfs_fh4_fmt_t fhfmt4, *finfo_fhp;
 
-	efhp = (fhandle_t *)&exi->exi_fh;
-	exi_fhp = (nfs_fh4_fmt_t *)&fhfmt4;
-
-	FH_TO_FMT4(efhp, exi_fhp);
+	EXI_FH_TO_FMT4(exi, &fhfmt4);
 
 	finfo_fhp =
 	    (nfs_fh4_fmt_t *)sp->rs_finfo->rf_filehandle.nfs_fh4_val;
 
-	if (EQFSID(&finfo_fhp->fh4_fsid, &exi_fhp->fh4_fsid) &&
-	    bcmp(&finfo_fhp->fh4_xdata, &exi_fhp->fh4_xdata,
-	    exi_fhp->fh4_xlen) == 0) {
+	if (EQFSID(&finfo_fhp->fh4_fsid, &fhfmt4.fh4_fsid) &&
+	    bcmp(finfo_fhp->fh4_xdata, fhfmt4.fh4_xdata,
+	    fhfmt4.fh4_xlen) == 0) {
 		rfs4_state_close(sp, TRUE, FALSE, CRED());
 		rfs4_dbe_invalidate(sp->rs_dbe);
 	}
@@ -3918,20 +3910,16 @@ rfs4_deleg_state_walk_callout(rfs4_entry_t u_entry, void *e)
 {
 	rfs4_deleg_state_t *dsp = (rfs4_deleg_state_t *)u_entry;
 	struct exportinfo *exi = (struct exportinfo *)e;
-	nfs_fh4_fmt_t   fhfmt4, *exi_fhp, *finfo_fhp;
-	fhandle_t *efhp;
+	nfs_fh4_fmt_t fhfmt4, *finfo_fhp;
 
-	efhp = (fhandle_t *)&exi->exi_fh;
-	exi_fhp = (nfs_fh4_fmt_t *)&fhfmt4;
-
-	FH_TO_FMT4(efhp, exi_fhp);
+	EXI_FH_TO_FMT4(exi, &fhfmt4);
 
 	finfo_fhp =
 	    (nfs_fh4_fmt_t *)dsp->rds_finfo->rf_filehandle.nfs_fh4_val;
 
-	if (EQFSID(&finfo_fhp->fh4_fsid, &exi_fhp->fh4_fsid) &&
-	    bcmp(&finfo_fhp->fh4_xdata, &exi_fhp->fh4_xdata,
-	    exi_fhp->fh4_xlen) == 0) {
+	if (EQFSID(&finfo_fhp->fh4_fsid, &fhfmt4.fh4_fsid) &&
+	    bcmp(finfo_fhp->fh4_xdata, fhfmt4.fh4_xdata,
+	    fhfmt4.fh4_xlen) == 0) {
 		rfs4_dbe_invalidate(dsp->rds_dbe);
 	}
 }
@@ -3949,19 +3937,15 @@ rfs4_file_walk_callout(rfs4_entry_t u_entry, void *e)
 {
 	rfs4_file_t *fp = (rfs4_file_t *)u_entry;
 	struct exportinfo *exi = (struct exportinfo *)e;
-	nfs_fh4_fmt_t   fhfmt4, *exi_fhp, *finfo_fhp;
-	fhandle_t *efhp;
+	nfs_fh4_fmt_t fhfmt4, *finfo_fhp;
 
-	efhp = (fhandle_t *)&exi->exi_fh;
-	exi_fhp = (nfs_fh4_fmt_t *)&fhfmt4;
-
-	FH_TO_FMT4(efhp, exi_fhp);
+	EXI_FH_TO_FMT4(exi, &fhfmt4);
 
 	finfo_fhp = (nfs_fh4_fmt_t *)fp->rf_filehandle.nfs_fh4_val;
 
-	if (EQFSID(&finfo_fhp->fh4_fsid, &exi_fhp->fh4_fsid) &&
-	    bcmp(&finfo_fhp->fh4_xdata, &exi_fhp->fh4_xdata,
-	    exi_fhp->fh4_xlen) == 0) {
+	if (EQFSID(&finfo_fhp->fh4_fsid, &fhfmt4.fh4_fsid) &&
+	    bcmp(finfo_fhp->fh4_xdata, fhfmt4.fh4_xdata,
+	    fhfmt4.fh4_xlen) == 0) {
 		if (fp->rf_vp) {
 			vnode_t *vp = fp->rf_vp;
 

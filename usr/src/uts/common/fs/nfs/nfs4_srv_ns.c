@@ -145,6 +145,7 @@ pseudo_exportfs(vnode_t *vp, fid_t *fid, struct exp_visible *vis_head,
 	struct exportdata *kex;
 	fsid_t fsid;
 	int vpathlen;
+	int error;
 
 	ASSERT(RW_WRITE_HELD(&exported_lock));
 
@@ -163,12 +164,8 @@ pseudo_exportfs(vnode_t *vp, fid_t *fid, struct exp_visible *vis_head,
 	/*
 	 * Build up the template fhandle
 	 */
-	exi->exi_fh.fh_fsid = fsid;
-	ASSERT(exi->exi_fid.fid_len <= sizeof (exi->exi_fh.fh_xdata));
-	exi->exi_fh.fh_xlen = exi->exi_fid.fid_len;
-	bcopy(exi->exi_fid.fid_data, exi->exi_fh.fh_xdata,
-	    exi->exi_fid.fid_len);
-	exi->exi_fh.fh_len = sizeof (exi->exi_fh.fh_data);
+	error = nfs_setup_exi_fh(exi, &exi->exi_fid, fsid);
+	ASSERT(error == 0);
 
 	kex = &exi->exi_export;
 	kex->ex_flags = EX_PSEUDO;

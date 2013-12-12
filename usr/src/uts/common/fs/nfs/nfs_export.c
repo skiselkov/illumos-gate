@@ -1178,16 +1178,8 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 	/*
 	 * Build up the template fhandle
 	 */
-	exi->exi_fh.fh_fsid = fsid;
-	if (exi->exi_fid.fid_len > sizeof (exi->exi_fh.fh_xdata)) {
-		error = EREMOTE;
+	if ((error = nfs_setup_exi_fh(exi, &exi->exi_fid, fsid)) != 0)
 		goto out1;
-	}
-	exi->exi_fh.fh_xlen = exi->exi_fid.fid_len;
-	bcopy(exi->exi_fid.fid_data, exi->exi_fh.fh_xdata,
-	    exi->exi_fid.fid_len);
-
-	exi->exi_fh.fh_len = sizeof (exi->exi_fh.fh_data);
 
 	kex = &exi->exi_export;
 
@@ -1967,6 +1959,12 @@ makefh(fhandle_t *fh, vnode_t *vp, exportinfo_t *exi)
 {
 	int error;
 
+	/*
+	 * Can't produce short file handles on this export, use NFSv3+.
+	 */
+	if (exi->exi_long_handle)
+		return (ENOTSUP);
+
 	*fh = exi->exi_fh;	/* struct copy */
 
 	error = VOP_FID(vp, (fid_t *)&fh->fh_len, NULL);
@@ -2188,14 +2186,23 @@ makefh4(nfs_fh4 *fh, vnode_t *vp, struct exportinfo *exi)
 
 	fh->nfs_fh4_len = NFS_FH4_LEN;
 
-	fh_fmtp->fh4_i.fhx_fsid = exi->exi_fh.fh_fsid;
-	fh_fmtp->fh4_i.fhx_xlen = exi->exi_fh.fh_xlen;
+	if (exi->exi_long_handle) {
+		fh_fmtp->fh4_i.fhx_fsid = exi->exi_fh3._fh3_fsid;
+		fh_fmtp->fh4_i.fhx_xlen = exi->exi_fh3._fh3_xlen;
+	} else {
+		fh_fmtp->fh4_i.fhx_fsid = exi->exi_fh.fh_fsid;
+		fh_fmtp->fh4_i.fhx_xlen = exi->exi_fh.fh_xlen;
+	}
 
 	bzero(fh_fmtp->fh4_i.fhx_data, sizeof (fh_fmtp->fh4_i.fhx_data));
 	bzero(fh_fmtp->fh4_i.fhx_xdata, sizeof (fh_fmtp->fh4_i.fhx_xdata));
 	ASSERT(exi->exi_fh.fh_xlen <= sizeof (fh_fmtp->fh4_i.fhx_xdata));
-	bcopy(exi->exi_fh.fh_xdata, fh_fmtp->fh4_i.fhx_xdata,
-	    exi->exi_fh.fh_xlen);
+	if (exi->exi_long_handle)
+		bcopy(exi->exi_fh3._fh3_xdata, fh_fmtp->fh4_i.fhx_xdata,
+		    exi->exi_fh3._fh3_xlen);
+	else
+		bcopy(exi->exi_fh.fh_xdata, fh_fmtp->fh4_i.fhx_xdata,
+		    exi->exi_fh.fh_xlen);
 
 	fh_fmtp->fh4_len = fid.fid_len;
 	ASSERT(fid.fid_len <= sizeof (fh_fmtp->fh4_data));
@@ -2582,6 +2589,36 @@ exi_rele(struct exportinfo *exi)
 		exportfree(exi);
 	} else
 		mutex_exit(&exi->exi_lock);
+}
+
+/*
+ * Sets up the template file handle in an export info structure using a
+ * sample file ID and fsid number. This needs a bit of care, because some
+ * filesystems (lofs) might return handles that are too long for NFSv2 to
+ * use.
+ */
+int
+nfs_setup_exi_fh(struct exportinfo *exi, fid_t *fidp, fsid_t fsid)
+{
+	if (fidp->fid_len <= sizeof (exi->exi_fh.fh_xdata)) {
+		/* file ID short enough for NFSv2/v3/v4 */
+		exi->exi_long_handle = B_FALSE;
+		exi->exi_fh.fh_fsid = fsid;
+		exi->exi_fh.fh_xlen = fidp->fid_len;
+		bcopy(fidp->fid_data, exi->exi_fh.fh_xdata, fidp->fid_len);
+		exi->exi_fh.fh_len = sizeof (exi->exi_fh.fh_data);
+	} else if (fidp->fid_len <= sizeof (exi->exi_fh3._fh3_xdata)) {
+		/* file ID longer than NFSv2, but short enough for NFSv3/v4 */
+		exi->exi_long_handle = B_TRUE;
+		exi->exi_fh3._fh3_fsid = fsid;
+		exi->exi_fh3._fh3_xlen = fidp->fid_len;
+		bcopy(fidp->fid_data, exi->exi_fh3._fh3_xdata, fidp->fid_len);
+		exi->exi_fh3._fh3_len = sizeof (exi->exi_fh3._fh3_data);
+	} else {
+		/* file ID too long to represent even in NFSv3/v4 */
+		return (EREMOTE);
+	}
+	return (0);
 }
 
 #ifdef VOLATILE_FH_TEST
