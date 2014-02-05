@@ -45,7 +45,7 @@ extern "C" {
 /* Round constant length, in number of 32-bit elements: */
 #define	RC_LENGTH	(5 * ((AES_BLOCK_LEN) / 4 - 2))
 
-#define	AES_COPY_BLOCK(src, dst) \
+#define	AES_COPY_BLOCK_UNALIGNED(src, dst) \
 	(dst)[0] = (src)[0]; \
 	(dst)[1] = (src)[1]; \
 	(dst)[2] = (src)[2]; \
@@ -63,7 +63,7 @@ extern "C" {
 	(dst)[14] = (src)[14]; \
 	(dst)[15] = (src)[15]
 
-#define	AES_XOR_BLOCK(src, dst) \
+#define	AES_XOR_BLOCK_UNALIGNED(src, dst) \
 	(dst)[0] ^= (src)[0]; \
 	(dst)[1] ^= (src)[1]; \
 	(dst)[2] ^= (src)[2]; \
@@ -80,6 +80,14 @@ extern "C" {
 	(dst)[13] ^= (src)[13]; \
 	(dst)[14] ^= (src)[14]; \
 	(dst)[15] ^= (src)[15]
+
+#define	AES_COPY_BLOCK_ALIGNED(src, dst) \
+	((uint64_t *)(void *)(dst))[0] = ((uint64_t *)(void *)(src))[0]; \
+	((uint64_t *)(void *)(dst))[1] = ((uint64_t *)(void *)(src))[1]
+
+#define	AES_XOR_BLOCK_ALIGNED(src, dst) \
+	((uint64_t *)(void *)(dst))[0] ^= ((uint64_t *)(void *)(src))[0]; \
+	((uint64_t *)(void *)(dst))[1] ^= ((uint64_t *)(void *)(src))[1]
 
 /* AES key size definitions */
 #define	AES_MINBITS		128
@@ -99,6 +107,43 @@ extern "C" {
 #define	MAX_AES_NR		14 /* Maximum number of rounds */
 #define	MAX_AES_NB		4  /* Number of columns comprising a state */
 
+/*
+ * Architecture-specific acceleration support autodetection.
+ * Some architectures provide hardware-assisted acceleration using floating
+ * point registers, which need special handling inside of the kernel, so the
+ * macros below define the auxiliary functions needed to utilize them.
+ */
+#if	defined(__amd64) && defined(_KERNEL)
+/*
+ * Using floating point registers requires temporarily disabling kernel
+ * thread preemption, so we need to operate on small-enough chunks to
+ * prevent scheduling latency bubbles.
+ * A typical 64-bit CPU can sustain around 300-400MB/s/core even in the
+ * slowest encryption modes (CBC), which with 4k per run works out to ~10us
+ * per run. CPUs with AES-NI in fast modes (ECB, CTR, CBC decryption) can
+ * easily sustain 3GB/s/core, so the latency potential essentially vanishes.
+ */
+#define	AES_OPSZ	131072
+
+#if	defined(lint) || defined(__lint)
+#define	AES_ACCEL_SAVESTATE(name)	uint8_t name[16 * 16 + 8]
+#else	/* lint || __lint */
+#define	AES_ACCEL_SAVESTATE(name) \
+	/* stack space for xmm0--xmm15 and cr0 (16 x 128 bits + 64 bits) */ \
+	uint8_t name[16 * 16 + 8] __attribute__((aligned(16)))
+#endif	/* lint || __lint */
+
+#else	/* !defined(__amd64) || !defined(_KERNEL) */
+/*
+ * All other accel support
+ */
+#define	AES_OPSZ	((uint64_t)-1)
+/* On other architectures or outside of the kernel these get stubbed out */
+#define	AES_ACCEL_SAVESTATE(name)
+#define	aes_accel_enter(savestate)
+#define	aes_accel_exit(savestate)
+#endif	/* !defined(__amd64) || !defined(_KERNEL) */
+
 typedef union {
 #ifdef	sun4u
 	uint64_t	ks64[((MAX_AES_NR) + 1) * (MAX_AES_NB)];
@@ -106,16 +151,12 @@ typedef union {
 	uint32_t	ks32[((MAX_AES_NR) + 1) * (MAX_AES_NB)];
 } aes_ks_t;
 
-/* aes_key.flags value: */
-#define	INTEL_AES_NI_CAPABLE	0x1	/* AES-NI instructions present */
-
 typedef struct aes_key aes_key_t;
 struct aes_key {
 	aes_ks_t	encr_ks;  /* encryption key schedule */
 	aes_ks_t	decr_ks;  /* decryption key schedule */
 #ifdef __amd64
 	long double	align128; /* Align fields above for Intel AES-NI */
-	int		flags;	  /* implementation-dependent flags */
 #endif	/* __amd64 */
 	int		nr;	  /* number of rounds (10, 12, or 14) */
 	int		type;	  /* key schedule size (32 or 64 bits) */
@@ -132,19 +173,47 @@ extern void aes_init_keysched(const uint8_t *cipherKey, uint_t keyBits,
 	void *keysched);
 extern int aes_encrypt_block(const void *ks, const uint8_t *pt, uint8_t *ct);
 extern int aes_decrypt_block(const void *ks, const uint8_t *ct, uint8_t *pt);
+extern int aes_encrypt_ecb(const void *ks, const uint8_t *pt, uint8_t *ct,
+    uint64_t length);
+extern int aes_decrypt_ecb(const void *ks, const uint8_t *pt, uint8_t *ct,
+    uint64_t length);
+extern int aes_encrypt_cbc(const void *ks, const uint8_t *pt, uint8_t *ct,
+    const uint8_t *iv, uint64_t length);
+extern int aes_ctr_mode(const void *ks, const uint8_t *pt, uint8_t *ct,
+    uint64_t length, uint64_t counter[2]);
 
 /*
  * AES mode functions.
  * The first 2 functions operate on 16-byte AES blocks.
  */
-extern void aes_copy_block(uint8_t *in, uint8_t *out);
-extern void aes_xor_block(uint8_t *data, uint8_t *dst);
+#ifdef	__amd64
+#define	AES_COPY_BLOCK	aes_copy_intel
+#define	AES_XOR_BLOCK	aes_xor_intel
+extern void aes_copy_intel(const uint8_t *src, uint8_t *dst);
+extern void aes_xor_intel(const uint8_t *src, uint8_t *dst);
+extern void aes_xor_intel8(const uint8_t *src, uint8_t *dst);
+#else	/* !__amd64 */
+#define	AES_COPY_BLOCK	aes_copy_block
+#define	AES_XOR_BLOCK	aes_xor_block
+extern void aes_copy_block(const uint8_t *src, uint8_t *dst);
+extern void aes_xor_block(const uint8_t *src, uint8_t *dst);
+#endif	/* !__amd64 */
 
 /* Note: ctx is a pointer to aes_ctx_t defined in modes.h */
 extern int aes_encrypt_contiguous_blocks(void *ctx, char *data, size_t length,
     crypto_data_t *out);
 extern int aes_decrypt_contiguous_blocks(void *ctx, char *data, size_t length,
     crypto_data_t *out);
+
+#ifdef	__amd64
+/*
+ * When AES floating-point acceleration is available, these will be called
+ * by the worker functions to clear and restore floating point state and
+ * control kernel thread preemption.
+ */
+void aes_accel_enter(void *savestate);
+void aes_accel_exit(void *savestate);
+#endif	/* __amd64 */
 
 /*
  * The following definitions and declarations are only used by AES FIPS POST

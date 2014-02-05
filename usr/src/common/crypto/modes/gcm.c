@@ -33,10 +33,13 @@
 
 #include <sys/types.h>
 #include <sys/kmem.h>
+#define	INLINE_CRYPTO_GET_PTRS
 #include <modes/modes.h>
 #include <sys/crypto/common.h>
 #include <sys/crypto/impl.h>
 #include <sys/byteorder.h>
+
+#define	COUNTER_MASK	0x00000000ffffffffULL
 
 #ifdef __amd64
 
@@ -44,20 +47,58 @@
 #include <sys/cpuvar.h>		/* cpu_t, CPU */
 #include <sys/x86_archext.h>	/* x86_featureset, X86FSET_*, CPUID_* */
 #include <sys/disp.h>		/* kpreempt_disable(), kpreempt_enable */
-/* Workaround for no XMM kernel thread save/restore */
-#define	KPREEMPT_DISABLE	kpreempt_disable()
-#define	KPREEMPT_ENABLE		kpreempt_enable()
 
+/* Workaround for no XMM kernel thread save/restore */
+extern void gcm_accel_save(void *savestate);
+extern void gcm_accel_restore(void *savestate);
+
+#if	defined(lint) || defined(__lint)
+#define	GCM_ACCEL_SAVESTATE(name)	uint8_t name[16 * 16 + 8]
 #else
+#define	GCM_ACCEL_SAVESTATE(name) \
+	/* stack space for xmm0--xmm15 and cr0 (16 x 128 bits + 64 bits) */ \
+	uint8_t name[16 * 16 + 8] __attribute__((aligned(16)))
+#endif
+
+/*
+ * Disables kernel thread preemption and conditionally gcm_accel_save() iff
+ * Intel PCLMULQDQ support is present. Must be balanced by GCM_ACCEL_EXIT.
+ * This must be present in all externally callable GCM functions which
+ * invoke GHASH operations using FPU-accelerated implementations, or call
+ * static functions which do (such as gcm_encrypt_fastpath128()).
+ */
+#define	GCM_ACCEL_ENTER \
+	GCM_ACCEL_SAVESTATE(savestate); \
+	do { \
+		if (intel_pclmulqdq_instruction_present()) { \
+			kpreempt_disable(); \
+			gcm_accel_save(savestate); \
+		} \
+		_NOTE(CONSTCOND) \
+	} while (0)
+#define	GCM_ACCEL_EXIT \
+	do { \
+		if (intel_pclmulqdq_instruction_present()) { \
+			gcm_accel_restore(savestate); \
+			kpreempt_enable(); \
+		} \
+		_NOTE(CONSTCOND) \
+	} while (0)
+
+#else	/* _KERNEL */
 #include <sys/auxv.h>		/* getisax() */
 #include <sys/auxv_386.h>	/* AV_386_PCLMULQDQ bit */
-#define	KPREEMPT_DISABLE
-#define	KPREEMPT_ENABLE
 #endif	/* _KERNEL */
 
 extern void gcm_mul_pclmulqdq(uint64_t *x_in, uint64_t *y, uint64_t *res);
-static int intel_pclmulqdq_instruction_present(void);
-#endif	/* __amd64 */
+extern void gcm_init_clmul(const uint64_t hash_init[2], uint8_t Htable[256]);
+extern void gcm_ghash_clmul(uint64_t ghash[2], const uint8_t Htable[256],
+    const uint8_t *inp, size_t length);
+static inline int intel_pclmulqdq_instruction_present(void);
+#else	/* !__amd64 */
+#define	GCM_ACCEL_ENTER
+#define	GCM_ACCEL_EXIT
+#endif	/* !__amd64 */
 
 struct aes_block {
 	uint64_t a;
@@ -75,14 +116,16 @@ struct aes_block {
  * Note: x_in, y, and res all point to 16-byte numbers (an array of two
  * 64-bit integers).
  */
-void
+static inline void
 gcm_mul(uint64_t *x_in, uint64_t *y, uint64_t *res)
 {
 #ifdef __amd64
 	if (intel_pclmulqdq_instruction_present()) {
-		KPREEMPT_DISABLE;
+		/*
+		 * FPU context will have been saved and kernel thread
+		 * preemption disabled already.
+		 */
 		gcm_mul_pclmulqdq(x_in, y, res);
-		KPREEMPT_ENABLE;
 	} else
 #endif	/* __amd64 */
 	{
@@ -116,23 +159,80 @@ gcm_mul(uint64_t *x_in, uint64_t *y, uint64_t *res)
 	}
 }
 
-
 #define	GHASH(c, d, t) \
-	xor_block((uint8_t *)(d), (uint8_t *)(c)->gcm_ghash); \
-	gcm_mul((uint64_t *)(void *)(c)->gcm_ghash, (c)->gcm_H, \
-	(uint64_t *)(void *)(t));
+	do { \
+		xor_block((uint8_t *)(d), (uint8_t *)(c)->gcm_ghash); \
+		gcm_mul((uint64_t *)(void *)(c)->gcm_ghash, (c)->gcm_H, \
+		    (uint64_t *)(void *)(t)); \
+		_NOTE(CONSTCOND) \
+	} while (0)
 
+boolean_t gcm_fastpath_enabled = B_TRUE;
+boolean_t gcm_fast_enabled = B_TRUE;
+
+static void
+gcm_encrypt_fastpath128(gcm_ctx_t *ctx, const uint8_t *data,
+    size_t length, uint8_t *out,
+    int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *),
+    int (*cipher_ctr)(const void *, const uint8_t *, uint8_t *, uint64_t,
+    uint64_t *))
+{
+	if (cipher_ctr != NULL) {
+		/*
+		 * GCM is almost but not quite like CTR. GCM increments the
+		 * counter value *before* processing the first input block,
+		 * whereas CTR does so afterwards. So we need to increment
+		 * the counter before calling CTR and decrement it afterwards.
+		 */
+		uint64_t counter = ntohll(ctx->gcm_cb[1]);
+
+		ctx->gcm_cb[1] = htonll((counter & ~COUNTER_MASK) |
+		    ((counter & COUNTER_MASK) + 1));
+		cipher_ctr(ctx->gcm_keysched, data, out, length, ctx->gcm_cb);
+		counter = ntohll(ctx->gcm_cb[1]);
+		ctx->gcm_cb[1] = htonll((counter & ~COUNTER_MASK) |
+		    ((counter & COUNTER_MASK) - 1));
+	} else {
+		uint64_t counter = ntohll(ctx->gcm_cb[1]);
+
+		for (size_t i = 0; i < length; i += 16) {
+			/*LINTED(E_BAD_PTR_CAST_ALIGN)*/
+			*(uint64_t *)&out[i] = ctx->gcm_cb[0];
+			/*LINTED(E_BAD_PTR_CAST_ALIGN)*/
+			*(uint64_t *)&out[i + 8] = htonll(++counter);
+			encrypt_block(ctx->gcm_keysched, &out[i], &out[i]);
+			xor_block(&data[i], &out[i]);
+		}
+
+		ctx->gcm_cb[1] = htonll(counter);
+	}
+#ifdef	__amd64
+	if (intel_pclmulqdq_instruction_present())
+		gcm_ghash_clmul(ctx->gcm_ghash, ctx->gcm_H_table, out, length);
+	else
+#endif	/* __amd64 */
+		for (size_t i = 0; i < length; i += 16) {
+			GHASH(ctx, &out[i], ctx->gcm_ghash);
+		}
+
+	bcopy(&out[length - 16], ctx->gcm_tmp, 16);
+	ctx->gcm_processed_data_len += length;
+}
 
 /*
  * Encrypt multiple blocks of data in GCM mode.  Decrypt for GCM mode
  * is done in another function.
  */
+/*ARGSUSED*/
 int
 gcm_mode_encrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
     crypto_data_t *out, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *),
+    int (*cipher_ctr)(const void *, const uint8_t *, uint8_t *, uint64_t,
+    uint64_t *))
 {
 	size_t remainder = length;
 	size_t need;
@@ -147,6 +247,27 @@ gcm_mode_encrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 	uint64_t counter;
 	uint64_t counter_mask = ntohll(0x00000000ffffffffULL);
 
+	GCM_ACCEL_ENTER;
+
+	/*
+	 * GCM encryption fastpath requirements:
+	 * - fastpath is enabled
+	 * - block size is 128 bits
+	 * - input is block-aligned
+	 * - the counter value won't overflow
+	 * - output is a single contiguous region and doesn't alias input
+	 */
+	if (gcm_fastpath_enabled && block_size == 16 &&
+	    ctx->gcm_remainder_len == 0 && length % block_size == 0 &&
+	    ntohll(ctx->gcm_cb[1] & counter_mask) <= ntohll(counter_mask) -
+	    length / block_size && CRYPTO_DATA_IS_SINGLE_BLOCK(out)) {
+		gcm_encrypt_fastpath128(ctx, (uint8_t *)data, length,
+		    CRYPTO_DATA_FIRST_BLOCK(out), encrypt_block, xor_block,
+		    cipher_ctr);
+		out->cd_offset += length;
+		goto out;
+	}
+
 	if (length + ctx->gcm_remainder_len < block_size) {
 		/* accumulate bytes here and return */
 		bcopy(datap,
@@ -154,7 +275,7 @@ gcm_mode_encrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 		    length);
 		ctx->gcm_remainder_len += length;
 		ctx->gcm_copy_to = datap;
-		return (CRYPTO_SUCCESS);
+		goto out;
 	}
 
 	lastp = (uint8_t *)ctx->gcm_cb;
@@ -244,6 +365,8 @@ gcm_mode_encrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 
 	} while (remainder > 0);
 out:
+	GCM_ACCEL_EXIT;
+
 	return (CRYPTO_SUCCESS);
 }
 
@@ -251,16 +374,19 @@ out:
 int
 gcm_encrypt_final(gcm_ctx_t *ctx, crypto_data_t *out, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	uint64_t counter_mask = ntohll(0x00000000ffffffffULL);
 	uint8_t *ghash, *macp;
 	int i, rv;
 
+	GCM_ACCEL_ENTER;
+
 	if (out->cd_length <
 	    (ctx->gcm_remainder_len + ctx->gcm_tag_len)) {
-		return (CRYPTO_DATA_LEN_RANGE);
+		rv = CRYPTO_DATA_LEN_RANGE;
+		goto out;
 	}
 
 	ghash = (uint8_t *)ctx->gcm_ghash;
@@ -310,26 +436,28 @@ gcm_encrypt_final(gcm_ctx_t *ctx, crypto_data_t *out, size_t block_size,
 	if (ctx->gcm_remainder_len > 0) {
 		rv = crypto_put_output_data(macp, out, ctx->gcm_remainder_len);
 		if (rv != CRYPTO_SUCCESS)
-			return (rv);
+			goto out;
 	}
 	out->cd_offset += ctx->gcm_remainder_len;
 	ctx->gcm_remainder_len = 0;
 	rv = crypto_put_output_data(ghash, out, ctx->gcm_tag_len);
 	if (rv != CRYPTO_SUCCESS)
-		return (rv);
+		goto out;
 	out->cd_offset += ctx->gcm_tag_len;
-
-	return (CRYPTO_SUCCESS);
+out:
+	GCM_ACCEL_EXIT;
+	return (rv);
 }
 
 /*
  * This will only deal with decrypting the last block of the input that
  * might not be a multiple of block length.
  */
+/*ARGSUSED*/
 static void
 gcm_decrypt_incomplete_block(gcm_ctx_t *ctx, size_t block_size, size_t index,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	uint8_t *datap, *outp, *counterp;
 	uint64_t counter;
@@ -370,9 +498,13 @@ int
 gcm_mode_decrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
     crypto_data_t *out, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
+	/*
+	 * No GHASH invocations in this function, so no need to
+	 * GCM_ACCEL_ENTER/GCM_ACCEL_EXIT either.
+	 */
 	size_t new_len;
 	uint8_t *new;
 
@@ -408,7 +540,7 @@ gcm_mode_decrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 int
 gcm_decrypt_final(gcm_ctx_t *ctx, crypto_data_t *out, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	size_t pt_len;
 	size_t remainder;
@@ -418,6 +550,8 @@ gcm_decrypt_final(gcm_ctx_t *ctx, crypto_data_t *out, size_t block_size,
 	uint64_t counter;
 	uint64_t counter_mask = ntohll(0x00000000ffffffffULL);
 	int processed = 0, rv;
+
+	GCM_ACCEL_ENTER;
 
 	ASSERT(ctx->gcm_processed_data_len == ctx->gcm_pt_buf_len);
 
@@ -468,6 +602,8 @@ out:
 	    (uint8_t *)ctx->gcm_J0);
 	xor_block((uint8_t *)ctx->gcm_J0, ghash);
 
+	GCM_ACCEL_EXIT;
+
 	/* compare the input authentication tag with what we calculated */
 	if (bcmp(&ctx->gcm_pt_buf[pt_len], ghash, ctx->gcm_tag_len)) {
 		/* They don't match */
@@ -478,6 +614,7 @@ out:
 			return (rv);
 		out->cd_offset += pt_len;
 	}
+
 	return (CRYPTO_SUCCESS);
 }
 
@@ -509,11 +646,12 @@ gcm_validate_args(CK_AES_GCM_PARAMS *gcm_param)
 	return (CRYPTO_SUCCESS);
 }
 
+/*ARGSUSED*/
 static void
 gcm_format_initial_blocks(uchar_t *iv, ulong_t iv_len,
     gcm_ctx_t *ctx, size_t block_size,
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	uint8_t *cb;
 	ulong_t remainder = iv_len;
@@ -564,11 +702,13 @@ int
 gcm_init(gcm_ctx_t *ctx, unsigned char *iv, size_t iv_len,
     unsigned char *auth_data, size_t auth_data_len, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	uint8_t *ghash, *datap, *authp;
 	size_t remainder, processed;
+
+	GCM_ACCEL_ENTER;
 
 	/* encrypt zero block to get subkey H */
 	bzero(ctx->gcm_H, sizeof (ctx->gcm_H));
@@ -577,6 +717,16 @@ gcm_init(gcm_ctx_t *ctx, unsigned char *iv, size_t iv_len,
 
 	gcm_format_initial_blocks(iv, iv_len, ctx, block_size,
 	    copy_block, xor_block);
+
+#ifdef	__amd64
+	if (intel_pclmulqdq_instruction_present()) {
+		uint64_t H_bswap64[2] = {
+		    ntohll(ctx->gcm_H[0]), ntohll(ctx->gcm_H[1])
+		};
+
+		gcm_init_clmul(H_bswap64, ctx->gcm_H_table);
+	}
+#endif
 
 	authp = (uint8_t *)ctx->gcm_tmp;
 	ghash = (uint8_t *)ctx->gcm_ghash;
@@ -606,15 +756,21 @@ gcm_init(gcm_ctx_t *ctx, unsigned char *iv, size_t iv_len,
 
 	} while (remainder > 0);
 
+	GCM_ACCEL_EXIT;
+
 	return (CRYPTO_SUCCESS);
 }
 
 int
 gcm_init_ctx(gcm_ctx_t *gcm_ctx, char *param, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
+	/*
+	 * No GHASH invocations in this function and gcm_init does its own
+	 * FPU saving, so no need to GCM_ACCEL_ENTER/GCM_ACCEL_EXIT here.
+	 */
 	int rv;
 	CK_AES_GCM_PARAMS *gcm_param;
 
@@ -652,9 +808,13 @@ out:
 int
 gmac_init_ctx(gcm_ctx_t *gcm_ctx, char *param, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
+	/*
+	 * No GHASH invocations in this function and gcm_init does its own
+	 * FPU saving, so no need to GCM_ACCEL_ENTER/GCM_ACCEL_EXIT here.
+	 */
 	int rv;
 	CK_AES_GMAC_PARAMS *gmac_param;
 
@@ -732,7 +892,7 @@ gcm_set_kmflag(gcm_ctx_t *ctx, int kmflag)
  * Note: the userland version uses getisax().  The kernel version uses
  * is_x86_featureset().
  */
-static int
+static inline int
 intel_pclmulqdq_instruction_present(void)
 {
 	static int	cached_result = -1;

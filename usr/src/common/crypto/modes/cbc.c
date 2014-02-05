@@ -31,9 +31,42 @@
 #endif
 
 #include <sys/types.h>
+#define	INLINE_CRYPTO_GET_PTRS
 #include <modes/modes.h>
 #include <sys/crypto/common.h>
 #include <sys/crypto/impl.h>
+
+boolean_t cbc_fastpath_enabled = B_TRUE;
+
+static void
+cbc_decrypt_fastpath(cbc_ctx_t *ctx, const uint8_t *data, size_t length,
+    uint8_t *out, size_t block_size,
+    int (*decrypt)(const void *, const uint8_t *, uint8_t *),
+    int (*decrypt_ecb)(const void *, const uint8_t *, uint8_t *, uint64_t),
+    void (*xor_block)(const uint8_t *, uint8_t *),
+    void (*xor_block_range)(const uint8_t *, uint8_t *, uint64_t))
+{
+	const uint8_t *iv = (uint8_t *)ctx->cbc_iv;
+
+	/* Use bulk decryption when available. */
+	if (decrypt_ecb != NULL) {
+		decrypt_ecb(ctx->cbc_keysched, data, out, length);
+	} else {
+		for (size_t i = 0; i < length; i += block_size)
+			decrypt(ctx->cbc_keysched, &data[i], &out[i]);
+	}
+
+	/* Use bulk XOR when available and we have enough data. */
+	if (xor_block_range && length >= 2 * block_size) {
+		xor_block(iv, out);
+		xor_block_range(data, &out[block_size], length - block_size);
+	} else {
+		for (size_t i = 0; i < length; i += block_size) {
+			xor_block(iv, &out[i]);
+			iv = &data[i];
+		}
+	}
+}
 
 /*
  * Algorithm independent CBC functions.
@@ -42,8 +75,10 @@ int
 cbc_encrypt_contiguous_blocks(cbc_ctx_t *ctx, char *data, size_t length,
     crypto_data_t *out, size_t block_size,
     int (*encrypt)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *),
+    int (*encrypt_cbc)(const void *, const uint8_t *, uint8_t *,
+    const uint8_t *, uint64_t))
 {
 	size_t remainder = length;
 	size_t need;
@@ -55,6 +90,31 @@ cbc_encrypt_contiguous_blocks(cbc_ctx_t *ctx, char *data, size_t length,
 	uint8_t *out_data_1;
 	uint8_t *out_data_2;
 	size_t out_data_1_len;
+
+	/*
+	 * CBC encryption fastpath requirements:
+	 * - fastpath is enabled
+	 * - algorithm-specific acceleration function is available
+	 * - input is block-aligned
+	 * - output is a single contiguous region or the user requested that
+	 *   we overwrite their input buffer (input/output aliasing allowed)
+	 */
+	if (cbc_fastpath_enabled && encrypt_cbc != NULL &&
+	    ctx->cbc_remainder_len == 0 && length % block_size == 0 &&
+	    (out == NULL || CRYPTO_DATA_IS_SINGLE_BLOCK(out))) {
+		if (out == NULL) {
+			encrypt_cbc(ctx->cbc_keysched, (uint8_t *)data,
+			    (uint8_t *)data, (uint8_t *)ctx->cbc_iv, length);
+			ctx->cbc_lastp = (uint8_t *)&data[length - block_size];
+		} else {
+			uint8_t *outp = CRYPTO_DATA_FIRST_BLOCK(out);
+			encrypt_cbc(ctx->cbc_keysched, (uint8_t *)data, outp,
+			    (uint8_t *)ctx->cbc_iv, length);
+			out->cd_offset += length;
+			ctx->cbc_lastp = &outp[length - block_size];
+		}
+		goto out;
+	}
 
 	if (length + ctx->cbc_remainder_len < block_size) {
 		/* accumulate bytes here and return */
@@ -169,8 +229,10 @@ int
 cbc_decrypt_contiguous_blocks(cbc_ctx_t *ctx, char *data, size_t length,
     crypto_data_t *out, size_t block_size,
     int (*decrypt)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *),
+    int (*decrypt_ecb)(const void *, const uint8_t *, uint8_t *, uint64_t),
+    void (*xor_block_range)(const uint8_t *, uint8_t *, uint64_t))
 {
 	size_t remainder = length;
 	size_t need;
@@ -182,6 +244,26 @@ cbc_decrypt_contiguous_blocks(cbc_ctx_t *ctx, char *data, size_t length,
 	uint8_t *out_data_1;
 	uint8_t *out_data_2;
 	size_t out_data_1_len;
+
+	/*
+	 * CBC decryption fastpath requirements:
+	 * - fastpath is enabled
+	 * - input is block-aligned
+	 * - output is a single contiguous region and doesn't alias input
+	 */
+	if (cbc_fastpath_enabled && ctx->cbc_remainder_len == 0 &&
+	    length % block_size == 0 && CRYPTO_DATA_IS_SINGLE_BLOCK(out) &&
+	    decrypt_ecb != NULL) {
+		uint8_t *outp = CRYPTO_DATA_FIRST_BLOCK(out);
+
+		cbc_decrypt_fastpath(ctx, (uint8_t *)data, length, outp,
+		    block_size, decrypt, decrypt_ecb, xor_block,
+		    xor_block_range);
+		out->cd_offset += length;
+		bcopy(&data[length - block_size], ctx->cbc_iv, block_size);
+		ctx->cbc_lastp = (uint8_t *)ctx->cbc_iv;
+		return (CRYPTO_SUCCESS);
+	}
 
 	if (length + ctx->cbc_remainder_len < block_size) {
 		/* accumulate bytes here and return */
@@ -280,7 +362,7 @@ cbc_decrypt_contiguous_blocks(cbc_ctx_t *ctx, char *data, size_t length,
 
 int
 cbc_init_ctx(cbc_ctx_t *cbc_ctx, char *param, size_t param_len,
-    size_t block_size, void (*copy_block)(uint8_t *, uint64_t *))
+    size_t block_size, void (*copy_block)(const uint8_t *, uint64_t *))
 {
 	/*
 	 * Copy IV into context.

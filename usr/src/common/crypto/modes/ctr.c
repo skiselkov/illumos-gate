@@ -31,10 +31,14 @@
 #endif
 
 #include <sys/types.h>
+#define	INLINE_CRYPTO_GET_PTRS
 #include <modes/modes.h>
 #include <sys/crypto/common.h>
 #include <sys/crypto/impl.h>
 #include <sys/byteorder.h>
+#include <sys/cmn_err.h>
+
+boolean_t ctr_fastpath_enabled = B_TRUE;
 
 /*
  * Encrypt and decrypt multiple blocks of data in counter mode.
@@ -43,7 +47,9 @@ int
 ctr_mode_contiguous_blocks(ctr_ctx_t *ctx, char *data, size_t length,
     crypto_data_t *out, size_t block_size,
     int (*cipher)(const void *ks, const uint8_t *pt, uint8_t *ct),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*xor_block)(const uint8_t *, uint8_t *),
+    int (*cipher_ctr)(const void *ks, const uint8_t *pt, uint8_t *ct,
+    uint64_t len, uint64_t counter[2]))
 {
 	size_t remainder = length;
 	size_t need;
@@ -56,6 +62,24 @@ ctr_mode_contiguous_blocks(ctr_ctx_t *ctx, char *data, size_t length,
 	uint8_t *out_data_2;
 	size_t out_data_1_len;
 	uint64_t lower_counter, upper_counter;
+
+	/*
+	 * CTR encryption/decryption fastpath requirements:
+	 * - fastpath is enabled
+	 * - algorithm-specific acceleration function is available
+	 * - input is block-aligned
+	 * - the counter value won't overflow the lower counter mask
+	 * - output is a single contiguous region and doesn't alias input
+	 */
+	if (ctr_fastpath_enabled && cipher_ctr != NULL &&
+	    ctx->ctr_remainder_len == 0 && length % block_size == 0 &&
+	    htonll(ctx->ctr_cb[1]) <= ctx->ctr_lower_mask - length / block_size
+	    && CRYPTO_DATA_IS_SINGLE_BLOCK(out)) {
+		cipher_ctr(ctx->ctr_keysched, (uint8_t *)data,
+		    CRYPTO_DATA_FIRST_BLOCK(out), length, ctx->ctr_cb);
+		out->cd_offset += length;
+		return (CRYPTO_SUCCESS);
+	}
 
 	if (length + ctx->ctr_remainder_len < block_size) {
 		/* accumulate bytes here and return */
@@ -205,7 +229,7 @@ ctr_mode_final(ctr_ctx_t *ctx, crypto_data_t *out,
 
 int
 ctr_init_ctx(ctr_ctx_t *ctr_ctx, ulong_t count, uint8_t *cb,
-void (*copy_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *))
 {
 	uint64_t upper_mask = 0;
 	uint64_t lower_mask = 0;
