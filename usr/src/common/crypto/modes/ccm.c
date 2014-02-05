@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
  */
 
 #ifndef _KERNEL
@@ -31,6 +32,7 @@
 
 #include <sys/types.h>
 #include <sys/kmem.h>
+#define	INLINE_CRYPTO_GET_PTRS
 #include <modes/modes.h>
 #include <sys/crypto/common.h>
 #include <sys/crypto/impl.h>
@@ -48,8 +50,8 @@ int
 ccm_mode_encrypt_contiguous_blocks(ccm_ctx_t *ctx, char *data, size_t length,
     crypto_data_t *out, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	size_t remainder = length;
 	size_t need;
@@ -206,7 +208,7 @@ calculate_ccm_mac(ccm_ctx_t *ctx, uint8_t *ccm_mac,
 int
 ccm_encrypt_final(ccm_ctx_t *ctx, crypto_data_t *out, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	uint8_t *lastp, *mac_buf, *ccm_mac_p, *macp;
 	void *iov_or_mp;
@@ -359,8 +361,8 @@ int
 ccm_mode_decrypt_contiguous_blocks(ccm_ctx_t *ctx, char *data, size_t length,
     crypto_data_t *out, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	size_t remainder = length;
 	size_t need;
@@ -526,8 +528,8 @@ out:
 int
 ccm_decrypt_final(ccm_ctx_t *ctx, crypto_data_t *out, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*copy_block)(uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	size_t mac_remain, pt_len;
 	uint8_t *pt, *mac_buf, *macp, *ccm_mac_p;
@@ -770,7 +772,7 @@ int
 ccm_init(ccm_ctx_t *ctx, unsigned char *nonce, size_t nonce_len,
     unsigned char *auth_data, size_t auth_data_len, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	uint8_t *mac_buf, *datap, *ivp, *authp;
 	size_t remainder, processed;
@@ -854,7 +856,7 @@ int
 ccm_init_ctx(ccm_ctx_t *ccm_ctx, char *param, int kmflag,
     boolean_t is_encrypt_init, size_t block_size,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*xor_block)(uint8_t *, uint8_t *))
+    void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	int rv;
 	CK_AES_CCM_PARAMS *ccm_param;

@@ -22,6 +22,9 @@
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 #ifndef _KERNEL
 #include <strings.h>
@@ -31,17 +34,26 @@
 #endif
 
 #include <sys/types.h>
+#define	INLINE_CRYPTO_GET_PTRS
 #include <modes/modes.h>
 #include <sys/crypto/common.h>
 #include <sys/crypto/impl.h>
 
+boolean_t ecb_fastpath_enabled = B_TRUE;
+
 /*
  * Algorithm independent ECB functions.
+ * `cipher' is a single-block version of the cipher function to be performed
+ * on each input block. `cipher_ecb' is an optional parameter, which if
+ * passed and the input/output conditions allow it, will be invoked for the
+ * entire input buffer once to accelerate the operation.
  */
 int
 ecb_cipher_contiguous_blocks(ecb_ctx_t *ctx, char *data, size_t length,
     crypto_data_t *out, size_t block_size,
-    int (*cipher)(const void *ks, const uint8_t *pt, uint8_t *ct))
+    int (*cipher)(const void *ks, const uint8_t *pt, uint8_t *ct),
+    int (*cipher_ecb)(const void *ks, const uint8_t *pt, uint8_t *ct,
+    uint64_t len))
 {
 	size_t remainder = length;
 	size_t need;
@@ -53,6 +65,28 @@ ecb_cipher_contiguous_blocks(ecb_ctx_t *ctx, char *data, size_t length,
 	uint8_t *out_data_1;
 	uint8_t *out_data_2;
 	size_t out_data_1_len;
+
+	/*
+	 * ECB encryption/decryption fastpath requirements:
+	 * - fastpath is enabled
+	 * - caller passed an accelerated ECB version of the cipher function
+	 * - input is block-aligned
+	 * - output is a single contiguous region or the user requested that
+	 *   we overwrite their input buffer (input/output aliasing allowed)
+	 */
+	if (ecb_fastpath_enabled && cipher_ecb != NULL &&
+	    ctx->ecb_remainder_len == 0 && length % block_size == 0 &&
+	    (out == NULL || CRYPTO_DATA_IS_SINGLE_BLOCK(out))) {
+		if (out == NULL) {
+			cipher_ecb(ctx->ecb_keysched, (uint8_t *)data,
+			    (uint8_t *)data, length);
+		} else {
+			cipher_ecb(ctx->ecb_keysched, (uint8_t *)data,
+			    CRYPTO_DATA_FIRST_BLOCK(out), length);
+			out->cd_offset += length;
+		}
+		return (CRYPTO_SUCCESS);
+	}
 
 	if (length + ctx->ecb_remainder_len < block_size) {
 		/* accumulate bytes here and return */

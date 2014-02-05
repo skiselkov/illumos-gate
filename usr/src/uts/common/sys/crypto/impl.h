@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
  */
 
 #ifndef	_SYS_CRYPTO_IMPL_H
@@ -1356,13 +1357,13 @@ extern int crypto_digest_data(crypto_data_t *, void *, uchar_t *,
     void (*update)(), void (*final)(), uchar_t);
 extern int crypto_update_iov(void *, crypto_data_t *, crypto_data_t *,
     int (*cipher)(void *, caddr_t, size_t, crypto_data_t *),
-    void (*copy_block)(uint8_t *, uint64_t *));
+    void (*copy_block)(const uint8_t *, uint64_t *));
 extern int crypto_update_uio(void *, crypto_data_t *, crypto_data_t *,
     int (*cipher)(void *, caddr_t, size_t, crypto_data_t *),
-    void (*copy_block)(uint8_t *, uint64_t *));
+    void (*copy_block)(const uint8_t *, uint64_t *));
 extern int crypto_update_mp(void *, crypto_data_t *, crypto_data_t *,
     int (*cipher)(void *, caddr_t, size_t, crypto_data_t *),
-    void (*copy_block)(uint8_t *, uint64_t *));
+    void (*copy_block)(const uint8_t *, uint64_t *));
 extern int crypto_get_key_attr(crypto_key_t *, crypto_attr_type_t, uchar_t **,
     ssize_t *);
 

@@ -22,6 +22,9 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 #include <sys/types.h>
 #include <sys/systm.h>
@@ -986,7 +989,7 @@ fix_des_parity(uint64_t *keyp)
 }
 
 void
-des_copy_block(uint8_t *in, uint8_t *out)
+des_copy_block(const uint8_t *in, uint8_t *out)
 {
 	if (IS_P2ALIGNED(in, sizeof (uint32_t)) &&
 	    IS_P2ALIGNED(out, sizeof (uint32_t))) {
@@ -1001,7 +1004,7 @@ des_copy_block(uint8_t *in, uint8_t *out)
 
 /* XOR block of data into dest */
 void
-des_xor_block(uint8_t *data, uint8_t *dst)
+des_xor_block(const uint8_t *data, uint8_t *dst)
 {
 	if (IS_P2ALIGNED(dst, sizeof (uint32_t)) &&
 	    IS_P2ALIGNED(data, sizeof (uint32_t))) {
@@ -1056,19 +1059,19 @@ des_encrypt_contiguous_blocks(void *ctx, char *data, size_t length,
 		if (des_ctx->dc_flags & CBC_MODE) {
 			rv = cbc_encrypt_contiguous_blocks(ctx, data,
 			    length, out, DES_BLOCK_LEN, des3_encrypt_block,
-			    des_copy_block, des_xor_block);
+			    des_copy_block, des_xor_block, NULL);
 		} else {
 			rv = ecb_cipher_contiguous_blocks(ctx, data, length,
-			    out, DES_BLOCK_LEN, des3_encrypt_block);
+			    out, DES_BLOCK_LEN, des3_encrypt_block, NULL);
 		}
 	} else {
 		if (des_ctx->dc_flags & CBC_MODE) {
 			rv = cbc_encrypt_contiguous_blocks(ctx, data,
 			    length, out, DES_BLOCK_LEN, des_encrypt_block,
-			    des_copy_block, des_xor_block);
+			    des_copy_block, des_xor_block, NULL);
 		} else {
 			rv = ecb_cipher_contiguous_blocks(ctx, data, length,
-			    out, DES_BLOCK_LEN, des_encrypt_block);
+			    out, DES_BLOCK_LEN, des_encrypt_block, NULL);
 		}
 	}
 	return (rv);
@@ -1088,10 +1091,10 @@ des_decrypt_contiguous_blocks(void *ctx, char *data, size_t length,
 		if (des_ctx->dc_flags & CBC_MODE) {
 			rv = cbc_decrypt_contiguous_blocks(ctx, data,
 			    length, out, DES_BLOCK_LEN, des3_decrypt_block,
-			    des_copy_block, des_xor_block);
+			    des_copy_block, des_xor_block, NULL, NULL);
 		} else {
 			rv = ecb_cipher_contiguous_blocks(ctx, data, length,
-			    out, DES_BLOCK_LEN, des3_decrypt_block);
+			    out, DES_BLOCK_LEN, des3_decrypt_block, NULL);
 			if (rv == CRYPTO_DATA_LEN_RANGE)
 				rv = CRYPTO_ENCRYPTED_DATA_LEN_RANGE;
 		}
@@ -1099,10 +1102,10 @@ des_decrypt_contiguous_blocks(void *ctx, char *data, size_t length,
 		if (des_ctx->dc_flags & CBC_MODE) {
 			rv = cbc_decrypt_contiguous_blocks(ctx, data,
 			    length, out, DES_BLOCK_LEN, des_decrypt_block,
-			    des_copy_block, des_xor_block);
+			    des_copy_block, des_xor_block, NULL, NULL);
 		} else {
 			rv = ecb_cipher_contiguous_blocks(ctx, data, length,
-			    out, DES_BLOCK_LEN, des_decrypt_block);
+			    out, DES_BLOCK_LEN, des_decrypt_block, NULL);
 			if (rv == CRYPTO_DATA_LEN_RANGE)
 				rv = CRYPTO_ENCRYPTED_DATA_LEN_RANGE;
 		}

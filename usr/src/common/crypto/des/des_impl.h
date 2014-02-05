@@ -22,6 +22,9 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 #ifndef	_DES_IMPL_H
 #define	_DES_IMPL_H
@@ -97,8 +100,8 @@ extern void des_init_keysched(uint8_t *, des_strength_t, void *);
 extern void *des_alloc_keysched(size_t *, des_strength_t, int);
 extern boolean_t des_keycheck(uint8_t *, des_strength_t, uint8_t *);
 extern void des_parity_fix(uint8_t *, des_strength_t, uint8_t *);
-extern void des_copy_block(uint8_t *, uint8_t *);
-extern void des_xor_block(uint8_t *, uint8_t *);
+extern void des_copy_block(const uint8_t *, uint8_t *);
+extern void des_xor_block(const uint8_t *, uint8_t *);
 extern int des_encrypt_block(const void *, const uint8_t *, uint8_t *);
 extern int des3_encrypt_block(const void *, const uint8_t *, uint8_t *);
 extern int des_decrypt_block(const void *, const uint8_t *, uint8_t *);

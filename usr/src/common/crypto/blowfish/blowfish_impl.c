@@ -22,6 +22,9 @@
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 /*
  * Blowfish encryption/decryption and keyschedule code.
@@ -699,7 +702,7 @@ blowfish_alloc_keysched(size_t *size, int kmflag)
 }
 
 void
-blowfish_copy_block(uint8_t *in, uint8_t *out)
+blowfish_copy_block(const uint8_t *in, uint8_t *out)
 {
 	if (IS_P2ALIGNED(in, sizeof (uint32_t)) &&
 	    IS_P2ALIGNED(out, sizeof (uint32_t))) {
@@ -714,7 +717,7 @@ blowfish_copy_block(uint8_t *in, uint8_t *out)
 
 /* XOR block of data into dest */
 void
-blowfish_xor_block(uint8_t *data, uint8_t *dst)
+blowfish_xor_block(const uint8_t *data, uint8_t *dst)
 {
 	if (IS_P2ALIGNED(dst, sizeof (uint32_t)) &&
 	    IS_P2ALIGNED(data, sizeof (uint32_t))) {
@@ -740,10 +743,10 @@ blowfish_encrypt_contiguous_blocks(void *ctx, char *data, size_t length,
 	if (blowfish_ctx->bc_flags & CBC_MODE) {
 		rv = cbc_encrypt_contiguous_blocks(ctx, data, length, out,
 		    BLOWFISH_BLOCK_LEN, blowfish_encrypt_block,
-		    blowfish_copy_block, blowfish_xor_block);
+		    blowfish_copy_block, blowfish_xor_block, NULL);
 	} else {
 		rv = ecb_cipher_contiguous_blocks(ctx, data, length, out,
-		    BLOWFISH_BLOCK_LEN, blowfish_encrypt_block);
+		    BLOWFISH_BLOCK_LEN, blowfish_encrypt_block, NULL);
 	}
 	return (rv);
 }
@@ -761,10 +764,10 @@ blowfish_decrypt_contiguous_blocks(void *ctx, char *data, size_t length,
 	if (blowfish_ctx->bc_flags & CBC_MODE) {
 		rv = cbc_decrypt_contiguous_blocks(ctx, data, length, out,
 		    BLOWFISH_BLOCK_LEN, blowfish_decrypt_block,
-		    blowfish_copy_block, blowfish_xor_block);
+		    blowfish_copy_block, blowfish_xor_block, NULL, NULL);
 	} else {
 		rv = ecb_cipher_contiguous_blocks(ctx, data, length, out,
-		    BLOWFISH_BLOCK_LEN, blowfish_decrypt_block);
+		    BLOWFISH_BLOCK_LEN, blowfish_decrypt_block, NULL);
 		if (rv == CRYPTO_DATA_LEN_RANGE)
 			rv = CRYPTO_ENCRYPTED_DATA_LEN_RANGE;
 	}

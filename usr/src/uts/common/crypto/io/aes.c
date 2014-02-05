@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
  */
 
 /*
@@ -386,7 +387,7 @@ aes_common_init(crypto_ctx_t *ctx, crypto_mechanism_t *mechanism,
 }
 
 static void
-aes_copy_block64(uint8_t *in, uint64_t *out)
+aes_copy_block64(const uint8_t *in, uint64_t *out)
 {
 	if (IS_P2ALIGNED(in, sizeof (uint64_t))) {
 		/* LINTED: pointer alignment */
@@ -396,7 +397,7 @@ aes_copy_block64(uint8_t *in, uint64_t *out)
 	} else {
 		uint8_t *iv8 = (uint8_t *)&out[0];
 
-		AES_COPY_BLOCK(in, iv8);
+		AES_COPY_BLOCK_UNALIGNED(in, iv8);
 	}
 }
 
@@ -475,7 +476,7 @@ aes_encrypt(crypto_ctx_t *ctx, crypto_data_t *plaintext,
 		ciphertext->cd_offset = ciphertext->cd_length;
 		ciphertext->cd_length = saved_length - ciphertext->cd_length;
 		ret = ccm_encrypt_final((ccm_ctx_t *)aes_ctx, ciphertext,
-		    AES_BLOCK_LEN, aes_encrypt_block, aes_xor_block);
+		    AES_BLOCK_LEN, aes_encrypt_block, AES_XOR_BLOCK);
 		if (ret != CRYPTO_SUCCESS) {
 			return (ret);
 		}
@@ -496,8 +497,8 @@ aes_encrypt(crypto_ctx_t *ctx, crypto_data_t *plaintext,
 		ciphertext->cd_offset = ciphertext->cd_length;
 		ciphertext->cd_length = saved_length - ciphertext->cd_length;
 		ret = gcm_encrypt_final((gcm_ctx_t *)aes_ctx, ciphertext,
-		    AES_BLOCK_LEN, aes_encrypt_block, aes_copy_block,
-		    aes_xor_block);
+		    AES_BLOCK_LEN, aes_encrypt_block, AES_COPY_BLOCK,
+		    AES_XOR_BLOCK);
 		if (ret != CRYPTO_SUCCESS) {
 			return (ret);
 		}
@@ -590,8 +591,8 @@ aes_decrypt(crypto_ctx_t *ctx, crypto_data_t *ciphertext,
 		plaintext->cd_length = saved_length - plaintext->cd_length;
 
 		ret = ccm_decrypt_final((ccm_ctx_t *)aes_ctx, plaintext,
-		    AES_BLOCK_LEN, aes_encrypt_block, aes_copy_block,
-		    aes_xor_block);
+		    AES_BLOCK_LEN, aes_encrypt_block, AES_COPY_BLOCK,
+		    AES_XOR_BLOCK);
 		if (ret == CRYPTO_SUCCESS) {
 			if (plaintext != ciphertext) {
 				plaintext->cd_length =
@@ -608,7 +609,8 @@ aes_decrypt(crypto_ctx_t *ctx, crypto_data_t *ciphertext,
 		plaintext->cd_length = saved_length - plaintext->cd_length;
 
 		ret = gcm_decrypt_final((gcm_ctx_t *)aes_ctx, plaintext,
-		    AES_BLOCK_LEN, aes_encrypt_block, aes_xor_block);
+		    AES_BLOCK_LEN, aes_encrypt_block, AES_XOR_BLOCK,
+		    AES_COPY_BLOCK, aes_ctr_mode);
 		if (ret == CRYPTO_SUCCESS) {
 			if (plaintext != ciphertext) {
 				plaintext->cd_length =
@@ -722,13 +724,15 @@ aes_decrypt_update(crypto_ctx_t *ctx, crypto_data_t *ciphertext,
 
 	/*
 	 * Compute number of bytes that will hold the plaintext.
-	 * This is not necessary for CCM, GCM, and GMAC since these
+	 * This is not necessary for CCM and GMAC since these
 	 * mechanisms never return plaintext for update operations.
 	 */
-	if ((aes_ctx->ac_flags & (CCM_MODE|GCM_MODE|GMAC_MODE)) == 0) {
+	if ((aes_ctx->ac_flags & (CCM_MODE|GMAC_MODE)) == 0) {
 		out_len = aes_ctx->ac_remainder_len;
 		out_len += ciphertext->cd_length;
 		out_len &= ~(AES_BLOCK_LEN - 1);
+		if (aes_ctx->ac_flags & GCM_MODE)
+			out_len -= ((gcm_ctx_t *)aes_ctx)->gcm_tag_len;
 
 		/* return length needed to store the output */
 		if (plaintext->cd_length < out_len) {
@@ -818,7 +822,7 @@ aes_encrypt_final(crypto_ctx_t *ctx, crypto_data_t *data,
 		}
 	} else if (aes_ctx->ac_flags & CCM_MODE) {
 		ret = ccm_encrypt_final((ccm_ctx_t *)aes_ctx, data,
-		    AES_BLOCK_LEN, aes_encrypt_block, aes_xor_block);
+		    AES_BLOCK_LEN, aes_encrypt_block, AES_XOR_BLOCK);
 		if (ret != CRYPTO_SUCCESS) {
 			return (ret);
 		}
@@ -826,8 +830,8 @@ aes_encrypt_final(crypto_ctx_t *ctx, crypto_data_t *data,
 		size_t saved_offset = data->cd_offset;
 
 		ret = gcm_encrypt_final((gcm_ctx_t *)aes_ctx, data,
-		    AES_BLOCK_LEN, aes_encrypt_block, aes_copy_block,
-		    aes_xor_block);
+		    AES_BLOCK_LEN, aes_encrypt_block, AES_COPY_BLOCK,
+		    AES_XOR_BLOCK);
 		if (ret != CRYPTO_SUCCESS) {
 			return (ret);
 		}
@@ -903,8 +907,8 @@ aes_decrypt_final(crypto_ctx_t *ctx, crypto_data_t *data,
 		saved_offset = data->cd_offset;
 		saved_length = data->cd_length;
 		ret = ccm_decrypt_final((ccm_ctx_t *)aes_ctx, data,
-		    AES_BLOCK_LEN, aes_encrypt_block, aes_copy_block,
-		    aes_xor_block);
+		    AES_BLOCK_LEN, aes_encrypt_block, AES_COPY_BLOCK,
+		    AES_XOR_BLOCK);
 		if (ret == CRYPTO_SUCCESS) {
 			data->cd_length = data->cd_offset - saved_offset;
 		} else {
@@ -917,21 +921,21 @@ aes_decrypt_final(crypto_ctx_t *ctx, crypto_data_t *data,
 		}
 	} else if (aes_ctx->ac_flags & (GCM_MODE|GMAC_MODE)) {
 		/*
-		 * This is where all the plaintext is returned, make sure
-		 * the plaintext buffer is big enough
+		 * Check to make sure there is enough space for remaining
+		 * plaintext.
 		 */
 		gcm_ctx_t *ctx = (gcm_ctx_t *)aes_ctx;
-		size_t pt_len = ctx->gcm_processed_data_len - ctx->gcm_tag_len;
+		size_t pt_len = ctx->gcm_last_input_fill - ctx->gcm_tag_len;
 
 		if (data->cd_length < pt_len) {
 			data->cd_length = pt_len;
 			return (CRYPTO_BUFFER_TOO_SMALL);
 		}
-
 		saved_offset = data->cd_offset;
 		saved_length = data->cd_length;
 		ret = gcm_decrypt_final((gcm_ctx_t *)aes_ctx, data,
-		    AES_BLOCK_LEN, aes_encrypt_block, aes_xor_block);
+		    AES_BLOCK_LEN, aes_encrypt_block, AES_COPY_BLOCK,
+		    AES_XOR_BLOCK, aes_ctr_mode);
 		if (ret == CRYPTO_SUCCESS) {
 			data->cd_length = data->cd_offset - saved_offset;
 		} else {
@@ -943,7 +947,6 @@ aes_decrypt_final(crypto_ctx_t *ctx, crypto_data_t *data,
 			return (ret);
 		}
 	}
-
 
 	if ((aes_ctx->ac_flags & (CTR_MODE|CCM_MODE|GCM_MODE|GMAC_MODE)) == 0) {
 		data->cd_length = 0;
@@ -1043,7 +1046,7 @@ aes_encrypt_atomic(crypto_provider_handle_t provider,
 		if (mechanism->cm_type == AES_CCM_MECH_INFO_TYPE) {
 			ret = ccm_encrypt_final((ccm_ctx_t *)&aes_ctx,
 			    ciphertext, AES_BLOCK_LEN, aes_encrypt_block,
-			    aes_xor_block);
+			    AES_XOR_BLOCK);
 			if (ret != CRYPTO_SUCCESS)
 				goto out;
 			ASSERT(aes_ctx.ac_remainder_len == 0);
@@ -1051,7 +1054,7 @@ aes_encrypt_atomic(crypto_provider_handle_t provider,
 		    mechanism->cm_type == AES_GMAC_MECH_INFO_TYPE) {
 			ret = gcm_encrypt_final((gcm_ctx_t *)&aes_ctx,
 			    ciphertext, AES_BLOCK_LEN, aes_encrypt_block,
-			    aes_copy_block, aes_xor_block);
+			    AES_COPY_BLOCK, AES_XOR_BLOCK);
 			if (ret != CRYPTO_SUCCESS)
 				goto out;
 			ASSERT(aes_ctx.ac_remainder_len == 0);
@@ -1182,7 +1185,7 @@ aes_decrypt_atomic(crypto_provider_handle_t provider,
 			    == aes_ctx.ac_mac_len);
 			ret = ccm_decrypt_final((ccm_ctx_t *)&aes_ctx,
 			    plaintext, AES_BLOCK_LEN, aes_encrypt_block,
-			    aes_copy_block, aes_xor_block);
+			    AES_COPY_BLOCK, AES_XOR_BLOCK);
 			ASSERT(aes_ctx.ac_remainder_len == 0);
 			if ((ret == CRYPTO_SUCCESS) &&
 			    (ciphertext != plaintext)) {
@@ -1195,7 +1198,7 @@ aes_decrypt_atomic(crypto_provider_handle_t provider,
 		    mechanism->cm_type == AES_GMAC_MECH_INFO_TYPE) {
 			ret = gcm_decrypt_final((gcm_ctx_t *)&aes_ctx,
 			    plaintext, AES_BLOCK_LEN, aes_encrypt_block,
-			    aes_xor_block);
+			    AES_COPY_BLOCK, AES_XOR_BLOCK, aes_ctr_mode);
 			ASSERT(aes_ctx.ac_remainder_len == 0);
 			if ((ret == CRYPTO_SUCCESS) &&
 			    (ciphertext != plaintext)) {
@@ -1236,11 +1239,6 @@ out:
 	if (aes_ctx.ac_flags & CCM_MODE) {
 		if (aes_ctx.ac_pt_buf != NULL) {
 			kmem_free(aes_ctx.ac_pt_buf, aes_ctx.ac_data_len);
-		}
-	} else if (aes_ctx.ac_flags & (GCM_MODE|GMAC_MODE)) {
-		if (((gcm_ctx_t *)&aes_ctx)->gcm_pt_buf != NULL) {
-			kmem_free(((gcm_ctx_t *)&aes_ctx)->gcm_pt_buf,
-			    ((gcm_ctx_t *)&aes_ctx)->gcm_pt_buf_len);
 		}
 	}
 
@@ -1352,7 +1350,7 @@ aes_common_init_ctx(aes_ctx_t *aes_ctx, crypto_spi_ctx_template_t *template,
 		}
 		pp = (CK_AES_CTR_PARAMS *)(void *)mechanism->cm_param;
 		rv = ctr_init_ctx((ctr_ctx_t *)aes_ctx, pp->ulCounterBits,
-		    pp->cb, aes_copy_block);
+		    pp->cb, AES_COPY_BLOCK);
 		break;
 	}
 	case AES_CCM_MECH_INFO_TYPE:
@@ -1362,7 +1360,7 @@ aes_common_init_ctx(aes_ctx_t *aes_ctx, crypto_spi_ctx_template_t *template,
 		}
 		rv = ccm_init_ctx((ccm_ctx_t *)aes_ctx, mechanism->cm_param,
 		    kmflag, is_encrypt_init, AES_BLOCK_LEN, aes_encrypt_block,
-		    aes_xor_block);
+		    AES_XOR_BLOCK);
 		break;
 	case AES_GCM_MECH_INFO_TYPE:
 		if (mechanism->cm_param == NULL ||
@@ -1370,8 +1368,8 @@ aes_common_init_ctx(aes_ctx_t *aes_ctx, crypto_spi_ctx_template_t *template,
 			return (CRYPTO_MECHANISM_PARAM_INVALID);
 		}
 		rv = gcm_init_ctx((gcm_ctx_t *)aes_ctx, mechanism->cm_param,
-		    AES_BLOCK_LEN, aes_encrypt_block, aes_copy_block,
-		    aes_xor_block);
+		    AES_BLOCK_LEN, aes_encrypt_block, AES_COPY_BLOCK,
+		    AES_XOR_BLOCK);
 		break;
 	case AES_GMAC_MECH_INFO_TYPE:
 		if (mechanism->cm_param == NULL ||
@@ -1379,8 +1377,8 @@ aes_common_init_ctx(aes_ctx_t *aes_ctx, crypto_spi_ctx_template_t *template,
 			return (CRYPTO_MECHANISM_PARAM_INVALID);
 		}
 		rv = gmac_init_ctx((gcm_ctx_t *)aes_ctx, mechanism->cm_param,
-		    AES_BLOCK_LEN, aes_encrypt_block, aes_copy_block,
-		    aes_xor_block);
+		    AES_BLOCK_LEN, aes_encrypt_block, AES_COPY_BLOCK,
+		    AES_XOR_BLOCK);
 		break;
 	case AES_ECB_MECH_INFO_TYPE:
 		aes_ctx->ac_flags |= ECB_MODE;

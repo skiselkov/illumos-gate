@@ -21,6 +21,7 @@
 
 #
 # Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright 2014 by Saso Kiselkov. All rights reserved.
 #
 
 LIBRARY =	libsoftcrypto.a
@@ -38,6 +39,7 @@ include		$(SRC)/lib/Makefile.lib.64
 CERRWARN +=	-_gcc=-Wno-type-limits
 CERRWARN +=	-_gcc=-Wno-parentheses
 CERRWARN +=	-_gcc=-Wno-uninitialized
+C99MODE =	$(C99_ENABLE)
 
 AES_PSM_SRC =	$(AES_DIR)/$(MACH64)/aes_amd64.s \
 		$(AES_DIR)/$(MACH64)/aes_intel.s \

@@ -22,6 +22,9 @@
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 #include <sys/strsun.h>
 #include <sys/systm.h>
@@ -396,7 +399,7 @@ dofinal:
 int
 crypto_update_iov(void *ctx, crypto_data_t *input, crypto_data_t *output,
     int (*cipher)(void *, caddr_t, size_t, crypto_data_t *),
-    void (*copy_block)(uint8_t *, uint64_t *))
+    void (*copy_block)(const uint8_t *, uint64_t *))
 {
 	common_ctx_t *common_ctx = ctx;
 	int rv;
@@ -418,7 +421,7 @@ crypto_update_iov(void *ctx, crypto_data_t *input, crypto_data_t *output,
 int
 crypto_update_uio(void *ctx, crypto_data_t *input, crypto_data_t *output,
     int (*cipher)(void *, caddr_t, size_t, crypto_data_t *),
-    void (*copy_block)(uint8_t *, uint64_t *))
+    void (*copy_block)(const uint8_t *, uint64_t *))
 {
 	common_ctx_t *common_ctx = ctx;
 	uio_t *uiop = input->cd_uio;
@@ -483,7 +486,7 @@ crypto_update_uio(void *ctx, crypto_data_t *input, crypto_data_t *output,
 int
 crypto_update_mp(void *ctx, crypto_data_t *input, crypto_data_t *output,
     int (*cipher)(void *, caddr_t, size_t, crypto_data_t *),
-    void (*copy_block)(uint8_t *, uint64_t *))
+    void (*copy_block)(const uint8_t *, uint64_t *))
 {
 	common_ctx_t *common_ctx = ctx;
 	off_t offset = input->cd_offset;

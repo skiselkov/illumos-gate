@@ -27,6 +27,9 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 /*
  * Accelerated GHASH implementation with Intel PCLMULQDQ-NI
@@ -90,6 +93,20 @@ void
 gcm_mul_pclmulqdq(uint64_t *x_in, uint64_t *y, uint64_t *res) {
 }
 
+#ifdef	_KERNEL
+/*ARGSUSED*/
+void
+gcm_intel_save(void *savestate)
+{
+}
+
+/*ARGSUSED*/
+void
+gcm_accel_restore(void *savestate)
+{
+}
+#endif	/* _KERNEL */
+
 #else	/* lint */
 
 #include <sys/asm_linkage.h>
@@ -116,80 +133,89 @@ gcm_mul_pclmulqdq(uint64_t *x_in, uint64_t *y, uint64_t *res) {
 #define	PROTECTED_CLTS \
 	CLTS
 #endif	/* __xpv */
-
-	/*
-	 * If CR0_TS is not set, align stack (with push %rbp) and push
-	 * %xmm0 - %xmm10 on stack, otherwise clear CR0_TS
-	 */
-#define	CLEAR_TS_OR_PUSH_XMM_REGISTERS(tmpreg) \
-	push	%rbp; \
-	mov	%rsp, %rbp; \
-	movq	%cr0, tmpreg; \
-	testq	$CR0_TS, tmpreg; \
-	jnz	1f; \
-	and	$-XMM_ALIGN, %rsp; \
-	sub	$[XMM_SIZE * 11], %rsp; \
-	movaps	%xmm0, 160(%rsp); \
-	movaps	%xmm1, 144(%rsp); \
-	movaps	%xmm2, 128(%rsp); \
-	movaps	%xmm3, 112(%rsp); \
-	movaps	%xmm4, 96(%rsp); \
-	movaps	%xmm5, 80(%rsp); \
-	movaps	%xmm6, 64(%rsp); \
-	movaps	%xmm7, 48(%rsp); \
-	movaps	%xmm8, 32(%rsp); \
-	movaps	%xmm9, 16(%rsp); \
-	movaps	%xmm10, (%rsp); \
-	jmp	2f; \
-1: \
-	PROTECTED_CLTS; \
-2:
-
-
-	/*
-	 * If CR0_TS was not set above, pop %xmm0 - %xmm10 off stack,
-	 * otherwise set CR0_TS.
-	 */
-#define	SET_TS_OR_POP_XMM_REGISTERS(tmpreg) \
-	testq	$CR0_TS, tmpreg; \
-	jnz	1f; \
-	movaps	(%rsp), %xmm10; \
-	movaps	16(%rsp), %xmm9; \
-	movaps	32(%rsp), %xmm8; \
-	movaps	48(%rsp), %xmm7; \
-	movaps	64(%rsp), %xmm6; \
-	movaps	80(%rsp), %xmm5; \
-	movaps	96(%rsp), %xmm4; \
-	movaps	112(%rsp), %xmm3; \
-	movaps	128(%rsp), %xmm2; \
-	movaps	144(%rsp), %xmm1; \
-	movaps	160(%rsp), %xmm0; \
-	jmp	2f; \
-1: \
-	STTS(tmpreg); \
-2: \
-	mov	%rbp, %rsp; \
-	pop	%rbp
-
-
-#else
-#define	PROTECTED_CLTS
-#define	CLEAR_TS_OR_PUSH_XMM_REGISTERS(tmpreg)
-#define	SET_TS_OR_POP_XMM_REGISTERS(tmpreg)
 #endif	/* _KERNEL */
 
-/*
- * Use this mask to byte-swap a 16-byte integer with the pshufb instruction
- */
-
-// static uint8_t byte_swap16_mask[] = {
-//	 15, 14, 13, 12, 11, 10, 9, 8, 7, 6 ,5, 4, 3, 2, 1, 0 };
 .text
 .align XMM_ALIGN
+/*
+ * Use this mask to byte-swap a 16-byte integer with the pshufb instruction:
+ * static uint8_t byte_swap16_mask[] = {
+ *	15, 14, 13, 12, 11, 10, 9, 8, 7, 6 ,5, 4, 3, 2, 1, 0 };
+ */
 .Lbyte_swap16_mask:
 	.byte	15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 
+#ifdef	_KERNEL
+/*
+ * void gcm_intel_save(void *savestate)
+ *
+ * Saves the XMM0--XMM14 registers and CR0 to a temporary location pointed
+ * to in the first argument and clears TS in CR0. This must be invoked before
+ * executing accelerated GCM computations inside the kernel (and kernel
+ * thread preemption must be disabled as well). The memory region to which
+ * all state is saved must be at least 16x 128-bit + 64-bit long and must
+ * be 128-bit aligned.
+ */
+ENTRY_NP(gcm_accel_save)
+	movq	%cr0, %rax
+	movq	%rax, 0x100(%rdi)
+	testq	$CR0_TS, %rax
+	jnz	1f
+	/* FPU is in use, save registers */
+	movaps	%xmm0, 0x00(%rdi)
+	movaps	%xmm1, 0x10(%rdi)
+	movaps	%xmm2, 0x20(%rdi)
+	movaps	%xmm3, 0x30(%rdi)
+	movaps	%xmm4, 0x40(%rdi)
+	movaps	%xmm5, 0x50(%rdi)
+	movaps	%xmm6, 0x60(%rdi)
+	movaps	%xmm7, 0x70(%rdi)
+	movaps	%xmm8, 0x80(%rdi)
+	movaps	%xmm9, 0x90(%rdi)
+	movaps	%xmm10, 0xa0(%rdi)
+	movaps	%xmm11, 0xb0(%rdi)
+	movaps	%xmm12, 0xc0(%rdi)
+	movaps	%xmm13, 0xd0(%rdi)
+	movaps	%xmm14, 0xe0(%rdi)
+	movaps	%xmm15, 0xf0(%rdi)
+	ret
+1:
+	PROTECTED_CLTS
+	ret
+	SET_SIZE(gcm_accel_save)
 
+/*
+ * void gcm_accel_restore(void *savestate)
+ *
+ * Restores the saved XMM and CR0.TS state from aes_accel_save.
+ */
+ENTRY_NP(gcm_accel_restore)
+	movq	0x100(%rdi), %rax
+	testq	$CR0_TS, %rax
+	jnz	1f
+	movaps	0x00(%rdi), %xmm0
+	movaps	0x10(%rdi), %xmm1
+	movaps	0x20(%rdi), %xmm2
+	movaps	0x30(%rdi), %xmm3
+	movaps	0x40(%rdi), %xmm4
+	movaps	0x50(%rdi), %xmm5
+	movaps	0x60(%rdi), %xmm6
+	movaps	0x70(%rdi), %xmm7
+	movaps	0x80(%rdi), %xmm8
+	movaps	0x90(%rdi), %xmm9
+	movaps	0xa0(%rdi), %xmm10
+	movaps	0xb0(%rdi), %xmm11
+	movaps	0xc0(%rdi), %xmm12
+	movaps	0xd0(%rdi), %xmm13
+	movaps	0xe0(%rdi), %xmm14
+	movaps	0xf0(%rdi), %xmm15
+	ret
+1:
+	STTS(%rax)
+	ret
+	SET_SIZE(gcm_accel_restore)
+
+#endif	/* _KERNEL */
 
 /*
  * void gcm_mul_pclmulqdq(uint64_t *x_in, uint64_t *y, uint64_t *res);
@@ -199,14 +225,11 @@ gcm_mul_pclmulqdq(uint64_t *x_in, uint64_t *y, uint64_t *res) {
  *
  * Byte swap the input and the output.
  *
- * Note: x_in, y, and res all point to a block of 20-byte numbers
+ * Note: x_in, y, and res all point to a block of 16-byte numbers
  * (an array of two 64-bit integers).
  *
- * Note2: For kernel code, caller is responsible for ensuring
- * kpreempt_disable() has been called.  This is because %xmm registers are
- * not saved/restored.  Clear and set the CR0.TS bit on entry and exit,
- * respectively, if TS is set on entry.  Otherwise, if TS is not set,
- * save and restore %xmm registers on the stack.
+ * Note2: For kernel code, caller is responsible for bracketing this call with
+ * disabling kernel thread preemption and calling gcm_accel_save/restore().
  *
  * Note3: Original Intel definition:
  * void galois_hash_asm(unsigned char *hk, unsigned char *s,
@@ -224,8 +247,6 @@ gcm_mul_pclmulqdq(uint64_t *x_in, uint64_t *y, uint64_t *res) {
  */
 
 ENTRY_NP(gcm_mul_pclmulqdq)
-	CLEAR_TS_OR_PUSH_XMM_REGISTERS(%r10)
-
 	//
 	// Copy Parameters
 	//
@@ -330,7 +351,6 @@ ENTRY_NP(gcm_mul_pclmulqdq)
 	//
 	// Cleanup and Return
 	//
-	SET_TS_OR_POP_XMM_REGISTERS(%r10)
 	ret
 	SET_SIZE(gcm_mul_pclmulqdq)
 

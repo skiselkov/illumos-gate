@@ -21,6 +21,7 @@
 
 #
 # Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright 2014 by Saso Kiselkov. All rights reserved.
 #
 
 LIBRARY =	libsoftcrypto.a
@@ -33,6 +34,7 @@ include		$(SRC)/lib/Makefile.lib
 CERRWARN +=	-_gcc=-Wno-type-limits
 CERRWARN +=	-_gcc=-Wno-parentheses
 CERRWARN +=	-_gcc=-Wno-uninitialized
+C99MODE =	$(C99_ENABLE)
 
 # Sources need to be redefined after Makefile.lib inclusion.
 SRCS =		$(AES_SRC) $(ARCFOUR_SRC) $(BIGNUM_SRC) $(BLOWFISH_SRC) \

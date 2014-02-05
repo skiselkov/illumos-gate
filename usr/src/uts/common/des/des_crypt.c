@@ -492,7 +492,7 @@ des_common_init(crypto_ctx_t *ctx, crypto_mechanism_t *mechanism,
 }
 
 static void
-des_copy_block64(uint8_t *in, uint64_t *out)
+des_copy_block64(const uint8_t *in, uint64_t *out)
 {
 	if (IS_P2ALIGNED(in, sizeof (uint64_t))) {
 		/* LINTED: pointer alignment */
