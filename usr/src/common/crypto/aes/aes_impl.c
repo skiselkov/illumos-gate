@@ -1749,7 +1749,7 @@ aes_decrypt_block(const void *ks, const uint8_t *ct, uint8_t *pt)
 			    &ksch->enc_or_dec ## r_ks.ks32[0],		\
 			    ksch->nr, &in[i], &out[i]);			\
 		/* finish off the remainder with the per-block one */	\
-		ECB_LOOP(aes_ ## enc_or_dec ## rypt_amd64, enc_or_dec,	\
+		ECB_LOOP(aes_ ## enc_or_dec ## rypt_intel, enc_or_dec,	\
 		    in, out);						\
 	} else {							\
 		ECB_LOOP(aes_ ## enc_or_dec ## rypt_amd64, enc_or_dec,	\

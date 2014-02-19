@@ -126,14 +126,8 @@ crypto_free_mode_ctx(void *ctx)
 	case GCM_MODE:
 	case GMAC_MODE:
 #ifdef _KERNEL
-		if (((gcm_ctx_t *)ctx)->gcm_pt_buf != NULL)
-			kmem_free(((gcm_ctx_t *)ctx)->gcm_pt_buf,
-			    ((gcm_ctx_t *)ctx)->gcm_pt_buf_len);
-
 		kmem_free(ctx, sizeof (gcm_ctx_t));
 #else
-		if (((gcm_ctx_t *)ctx)->gcm_pt_buf != NULL)
-			free(((gcm_ctx_t *)ctx)->gcm_pt_buf);
 		free(ctx);
 #endif
 	}

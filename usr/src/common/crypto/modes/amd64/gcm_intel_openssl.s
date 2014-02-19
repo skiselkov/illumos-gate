@@ -26,6 +26,8 @@ gcm_init_clmul(const uint64_t hash_init[2], uint8_t Htable[256])
 
 .text
 .align XMM_ALIGN
+.Lbyte_swap16_mask:
+	.byte	15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 .L0x1c2_polynomial:
 	.byte	1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xc2
 .L7_mask:

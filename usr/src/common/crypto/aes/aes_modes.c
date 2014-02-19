@@ -182,7 +182,7 @@ aes_decrypt_contiguous_blocks(void *ctx, char *data, size_t length,
 		} else if (aes_ctx->ac_flags & (GCM_MODE|GMAC_MODE)) {
 			rv = gcm_mode_decrypt_contiguous_blocks(ctx, &data[i],
 			    opsz, out, AES_BLOCK_LEN, aes_encrypt_block,
-			    AES_COPY_BLOCK, AES_XOR_BLOCK);
+			    AES_COPY_BLOCK, AES_XOR_BLOCK, aes_ctr_mode);
 #endif
 		} else if (aes_ctx->ac_flags & CBC_MODE) {
 			rv = cbc_decrypt_contiguous_blocks(ctx, &data[i],

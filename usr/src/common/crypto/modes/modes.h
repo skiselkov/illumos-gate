@@ -207,17 +207,17 @@ typedef struct gcm_ctx {
 	struct common_ctx gcm_common;
 	size_t gcm_tag_len;
 	size_t gcm_processed_data_len;
-	size_t gcm_pt_buf_len;
-	uint32_t gcm_tmp[4];
 	uint64_t gcm_ghash[2];
 	uint64_t gcm_H[2];
 #ifdef	__amd64
 	uint8_t gcm_H_table[256];	/* pipelined Karatsuba multipliers */
 #endif
 	uint64_t gcm_J0[2];
+	uint64_t gcm_tmp[2];
 	uint64_t gcm_len_a_len_c[2];
-	uint8_t *gcm_pt_buf;
 	int gcm_kmflag;
+	uint8_t gcm_last_input[32];
+	size_t gcm_last_input_fill;
 } gcm_ctx_t;
 
 #define	gcm_keysched		gcm_common.cc_keysched
@@ -337,7 +337,9 @@ extern int gcm_mode_decrypt_contiguous_blocks(gcm_ctx_t *, char *, size_t,
     crypto_data_t *, size_t,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
     void (*copy_block)(const uint8_t *, uint8_t *),
-    void (*xor_block)(const uint8_t *, uint8_t *));
+    void (*xor_block)(const uint8_t *, uint8_t *),
+    int (*cipher_ctr)(const void *, const uint8_t *, uint8_t *, uint64_t,
+    uint64_t *));
 
 int ccm_encrypt_final(ccm_ctx_t *, crypto_data_t *, size_t,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
@@ -355,7 +357,10 @@ extern int ccm_decrypt_final(ccm_ctx_t *, crypto_data_t *, size_t,
 
 extern int gcm_decrypt_final(gcm_ctx_t *, crypto_data_t *, size_t,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
-    void (*xor_block)(const uint8_t *, uint8_t *));
+    void (*copy_block)(const uint8_t *, uint8_t *),
+    void (*xor_block)(const uint8_t *, uint8_t *),
+    int (*cipher_ctr)(const void *, const uint8_t *, uint8_t *, uint64_t,
+    uint64_t *));
 
 extern int ctr_mode_final(ctr_ctx_t *, crypto_data_t *,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *));
