@@ -1,3 +1,44 @@
+/*
+ * Copyright (c) 2013, CRYPTOGAMS by <appro@openssl.org>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * *	Redistributions of source code must retain copyright notices,
+ *	this list of conditions and the following disclaimer.
+ *
+ * *	Redistributions in binary form must reproduce the above
+ *	copyright notice, this list of conditions and the following
+ *	disclaimer in the documentation and/or other materials
+ *	provided with the distribution.
+ *
+ * *	Neither the name of the CRYPTOGAMS nor the names of its
+ *	copyright holder and contributors may be used to endorse or
+ *	promote products derived from this software without specific
+ *	prior written permission.
+ *
+ * ALTERNATIVELY, provided that this notice is retained in full, this
+ * product may be distributed under the terms of the GNU General Public
+ * License (GPL), in which case the provisions of the GPL apply INSTEAD OF
+ * those given above.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+/*
+ * Illumos port copyright 2014 by Saso Kiselkov.
+ */
 
 #if defined(lint) || defined(__lint)
 
@@ -197,32 +238,32 @@ ENTRY_NP(gcm_ghash_clmul)
 	movdqa		%Xln, %Xhn
 	pshufd		$0b01001110, %Xln, %Xmn
 
-	pxor		%Xi, %T1		/ aggregated Karatsuba post-proc
+	pxor		%Xi, %T1	/ aggregated Karatsuba post-processing
 	pxor		%Xln, %Xmn
-	pxor		%Xhi, %T1		/
-	movdqa		%T1, %T2		/
+	pxor		%Xhi, %T1
+	movdqa		%T1, %T2
 	pslldq		$8, %T1
 	pclmulqdq	$0x11, %Hkey, %Xh
-	psrldq		$8, %T2			/
+	psrldq		$8, %T2
 	pxor		%T1, %Xi
 	movdqa		.L7_mask(%rip), %T1
-	pxor		%T2, %Xhi		/
+	pxor		%T2, %Xhi
 	movq		%rax, %T2
 
-	pand		%Xi, %T1		/ 1st phase
-	pshufb		%T1, %T2		/
+	pand		%Xi, %T1	/ 1st phase
+	pshufb		%T1, %T2
 	pclmulqdq	$0x00, %HK, %Xm
-	pxor		%Xi, %T2		/
-	psllq		$57, %T2		/
-	movdqa		%T2, %T1		/
+	pxor		%Xi, %T2
+	psllq		$57, %T2
+	movdqa		%T2, %T1
 	pslldq		$8, %T2
 	pclmulqdq	$0x00, %Hkey2, %Xln
-	psrldq		$8, %T1			/
+	psrldq		$8, %T1
 	pxor		%T2, %Xi
-	pxor		%T1, %Xhi		/
+	pxor		%T1, %Xhi
 	movdqu		0(%inp), %T1
 
-	movdqa		%Xi, %T2		/ 2nd phase
+	movdqa		%Xi, %T2	/ 2nd phase
 	psrlq		$1, %Xi
 	pclmulqdq	$0x11, %Hkey2, %Xhn
 	xorps		%Xl, %Xln
@@ -232,7 +273,7 @@ ENTRY_NP(gcm_ghash_clmul)
 	xorps		%Xh, %Xhn
 	movups		0x50(%Htbl), %HK
 	pshufb		%T3, %T1
-	pxor		%T2, %Xhi		/
+	pxor		%T2, %Xhi
 	pxor		%Xi, %T2
 	psrlq		$5, %Xi
 
@@ -241,12 +282,12 @@ ENTRY_NP(gcm_ghash_clmul)
 	pshufd		$0b01001110, %Xl, %Xm
 	pxor		%Xl, %Xm
 	pclmulqdq	$0x00, %Hkey3, %Xl
-	pxor		%T2, %Xi		/
+	pxor		%T2, %Xi
 	pxor		%T1, %Xhi
-	psrlq		$1, %Xi			/
+	psrlq		$1, %Xi
 	pclmulqdq	$0x11, %Hkey3, %Xh
 	xorps		%Xl, %Xln
-	pxor		%Xhi, %Xi		/
+	pxor		%Xhi, %Xi
 
 	pclmulqdq	$0x00, %HK, %Xm
 	xorps		%Xh, %Xhn
@@ -266,17 +307,17 @@ ENTRY_NP(gcm_ghash_clmul)
 	xorps		%Xln, %Xi
 	pclmulqdq	$0x10, %HK, %T1
 	xorps		%Xhn, %Xhi
-	pxor		%Xi, %Xhi		/ aggregated Karatsuba post-proc
+	pxor		%Xi, %Xhi	/ aggregated Karatsuba post-processing
 	pxor		%Xmn, %T1
 
-	pxor		%Xhi, %T1		/
+	pxor		%Xhi, %T1
 	pxor		%Xi, %Xhi
 
-	movdqa		%T1, %T2		/
+	movdqa		%T1, %T2
 	psrldq		$8, %T1
-	pslldq		$8, %T2		/
+	pslldq		$8, %T2
 	pxor		%T1, %Xhi
-	pxor		%T2, %Xi		/
+	pxor		%T2, %Xi
 
 	reduction_alg9
 
@@ -313,8 +354,8 @@ ENTRY_NP(gcm_ghash_clmul)
 .align	32
 .Lmod_loop:
 	movdqa		%Xi, %Xhi
-	pshufd		$0b01001110, %Xi, %T2	/
-	pxor		%Xi, %T2		/
+	pshufd		$0b01001110, %Xi, %T2
+	pxor		%Xi, %T2
 
 	pclmulqdq	$0x00, %Hkey2, %Xi
 	pclmulqdq	$0x11, %Hkey2, %Xhi
@@ -331,40 +372,40 @@ ENTRY_NP(gcm_ghash_clmul)
 	pxor		%Xhn, %Xhi		/ "Ii+Xi",  consume early
 	pxor		%T1, %T2
 	pshufb		%T3, %Xln
-	movdqa		%T2, %T1		/
+	movdqa		%T2, %T1
 	psrldq		$8, %T1
-	pslldq		$8, %T2			/
+	pslldq		$8, %T2
 	pxor		%T1, %Xhi
-	pxor		%T2, %Xi		/
+	pxor		%T2, %Xi
 
-	movdqa		%Xln, %Xhn		/
+	movdqa		%Xln, %Xhn
 
 	movdqa		%Xi, %T2		/ 1st phase
 	movdqa		%Xi, %T1
 	psllq		$5, %Xi
-	pclmulqdq	$0x00, %Hkey, %Xln	/
-	pxor		%Xi, %T1		/
+	pclmulqdq	$0x00, %Hkey, %Xln
+	pxor		%Xi, %T1
 	psllq		$1, %Xi
-	pxor		%T1, %Xi		/
-	psllq		$57, %Xi		/
-	movdqa		%Xi, %T1		/
+	pxor		%T1, %Xi
+	psllq		$57, %Xi
+	movdqa		%Xi, %T1
 	pslldq		$8, %Xi
-	psrldq		$8, %T1			/
+	psrldq		$8, %T1
 	pxor		%T2, %Xi
-	pxor		%T1, %Xhi		/
+	pxor		%T1, %Xhi
 	pshufd		$0b01001110, %Xhn, %T1
-	pxor		%Xhn, %T1		/
+	pxor		%Xhn, %T1
 
-	pclmulqdq	$0x11, %Hkey, %Xhn	/
+	pclmulqdq	$0x11, %Hkey, %Xhn
 	movdqa		%Xi, %T2		/ 2nd phase
 	psrlq		$1, %Xi
-	pxor		%T2, %Xhi		/
+	pxor		%T2, %Xhi
 	pxor		%Xi, %T2
 	psrlq		$5, %Xi
-	pxor		%T2, %Xi		/
-	psrlq		$1, %Xi			/
-	pclmulqdq	$0x00, %HK, %T1		/
-	pxor		%Xhi, %Xi		/
+	pxor		%T2, %Xi
+	psrlq		$1, %Xi
+	pclmulqdq	$0x00, %HK, %T1
+	pxor		%Xhi, %Xi
 
 	lea		32(%inp), %inp
 	sub		$0x20, %len
@@ -372,8 +413,8 @@ ENTRY_NP(gcm_ghash_clmul)
 
 .Leven_tail:
 	movdqa		%Xi, %Xhi
-	pshufd		$0b01001110, %Xi, %T2	/
-	pxor		%Xi, %T2		/
+	pshufd		$0b01001110, %Xi, %T2
+	pxor		%Xi, %T2
 
 	pclmulqdq	$0x00, %Hkey2, %Xi
 	pclmulqdq	$0x11, %Hkey2, %Xhi
@@ -384,11 +425,11 @@ ENTRY_NP(gcm_ghash_clmul)
 	pxor		%Xi, %T1
 	pxor		%Xhi, %T1
 	pxor		%T1, %T2
-	movdqa		%T2, %T1		/
+	movdqa		%T2, %T1
 	psrldq		$8, %T1
-	pslldq		$8, %T2			/
+	pslldq		$8, %T2
 	pxor		%T1, %Xhi
-	pxor		%T2, %Xi		/
+	pxor		%T2, %Xi
 
 	reduction_alg9
 
