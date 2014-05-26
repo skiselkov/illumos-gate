@@ -723,13 +723,15 @@ aes_decrypt_update(crypto_ctx_t *ctx, crypto_data_t *ciphertext,
 
 	/*
 	 * Compute number of bytes that will hold the plaintext.
-	 * This is not necessary for CCM, GCM, and GMAC since these
+	 * This is not necessary for CCM and GMAC since these
 	 * mechanisms never return plaintext for update operations.
 	 */
-	if ((aes_ctx->ac_flags & (CCM_MODE|GCM_MODE|GMAC_MODE)) == 0) {
+	if ((aes_ctx->ac_flags & (CCM_MODE|GMAC_MODE)) == 0) {
 		out_len = aes_ctx->ac_remainder_len;
 		out_len += ciphertext->cd_length;
 		out_len &= ~(AES_BLOCK_LEN - 1);
+		if (aes_ctx->ac_flags & GCM_MODE)
+			out_len -= ((gcm_ctx_t *)aes_ctx)->gcm_tag_len;
 
 		/* return length needed to store the output */
 		if (plaintext->cd_length < out_len) {
@@ -918,17 +920,20 @@ aes_decrypt_final(crypto_ctx_t *ctx, crypto_data_t *data,
 		}
 	} else if (aes_ctx->ac_flags & (GCM_MODE|GMAC_MODE)) {
 		/*
-		 * This is where all the plaintext is returned, make sure
-		 * the plaintext buffer is big enough
+		 * Check to make sure there is enough space for remaining
+		 * plaintext.
 		 */
 		gcm_ctx_t *ctx = (gcm_ctx_t *)aes_ctx;
-		size_t pt_len = ctx->gcm_processed_data_len - ctx->gcm_tag_len;
+		size_t pt_len = ctx->gcm_last_input_fill - ctx->gcm_tag_len;
 
+		cmn_err(CE_NOTE, "data->cd_length: %llu data->cd_offset: %llu, pt_len: %llu",
+		    (unsigned long long) data->cd_length,
+		    (unsigned long long) data->cd_offset,
+		    (unsigned long long) pt_len);
 		if (data->cd_length < pt_len) {
 			data->cd_length = pt_len;
 			return (CRYPTO_BUFFER_TOO_SMALL);
 		}
-
 		saved_offset = data->cd_offset;
 		saved_length = data->cd_length;
 		ret = gcm_decrypt_final((gcm_ctx_t *)aes_ctx, data,
@@ -945,7 +950,6 @@ aes_decrypt_final(crypto_ctx_t *ctx, crypto_data_t *data,
 			return (ret);
 		}
 	}
-
 
 	if ((aes_ctx->ac_flags & (CTR_MODE|CCM_MODE|GCM_MODE|GMAC_MODE)) == 0) {
 		data->cd_length = 0;

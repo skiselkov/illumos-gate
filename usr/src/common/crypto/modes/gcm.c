@@ -474,15 +474,10 @@ gcm_encrypt_final(gcm_ctx_t *ctx, crypto_data_t *out, size_t block_size,
 
 	ctx->gcm_len_a_len_c[1] =
 	    htonll(CRYPTO_BYTES2BITS(ctx->gcm_processed_data_len));
-	PRINT_BLOCK("gcm_len_a_len_c", ctx->gcm_len_a_len_c);
 	GHASH(ctx, ctx->gcm_len_a_len_c, ghash);
-	PRINT_BLOCK("GHASH(H,A,C)", ctx->gcm_ghash);
-	PRINT_BLOCK("Y0", ctx->gcm_J0);
 	encrypt_block(ctx->gcm_keysched, (uint8_t *)ctx->gcm_J0,
 	    (uint8_t *)ctx->gcm_J0);
-	PRINT_BLOCK("E(K,Y0)", ctx->gcm_J0);
 	xor_block((uint8_t *)ctx->gcm_J0, ghash);
-	PRINT_BLOCK("T", ctx->gcm_ghash);
 
 	if (ctx->gcm_remainder_len > 0) {
 		rv = crypto_put_output_data(macp, out, ctx->gcm_remainder_len);
@@ -507,35 +502,42 @@ out:
 /*ARGSUSED*/
 static void
 gcm_decrypt_incomplete_block(gcm_ctx_t *ctx, uint8_t *data, size_t length,
-    crypto_data_t *out,
+    size_t block_size, crypto_data_t *out,
     int (*encrypt_block)(const void *, const uint8_t *, uint8_t *),
     void (*xor_block)(const uint8_t *, uint8_t *))
 {
 	uint64_t counter;
 	uint64_t counter_mask = ntohll(0x00000000ffffffffULL);
 
-	GHASH(ctx, data, ctx->gcm_ghash);
+	/* padd last block and add to GHASH */
+	bcopy(data, ctx->gcm_tmp, length);
+	bzero(((uint8_t*)ctx->gcm_tmp) + length,
+	    sizeof (ctx->gcm_tmp) - length);
+	GHASH(ctx, ctx->gcm_tmp, ctx->gcm_ghash);
 
 	/*
 	 * Increment counter.
-	 * Counter bits are confined to the bottom 32 bits
+	 * Counter bits are confined to the bottom 32 bits.
 	 */
 	counter = ntohll(ctx->gcm_cb[1] & counter_mask);
 	counter = htonll(counter + 1);
 	counter &= counter_mask;
-
 	ctx->gcm_cb[1] = (ctx->gcm_cb[1] & ~counter_mask) | counter;
+
 	encrypt_block(ctx->gcm_keysched, (uint8_t *)ctx->gcm_cb,
 	    (uint8_t *)ctx->gcm_tmp);
+
 	/* XOR with counter block */
 	for (size_t i = 0; i < length; i++)
-		ctx->gcm_tmp[i] ^= data[i];
+		((uint8_t *)ctx->gcm_tmp)[i] ^= data[i];
 
-	if (out != NULL)
+	if (out != NULL) {
 		(void) crypto_put_output_data((uchar_t *)ctx->gcm_tmp, out,
 		    length);
-	else
+		out->cd_offset += length;
+	} else {
 		bcopy(ctx->gcm_tmp, data, length);
+	}
 }
 
 /* ARGSUSED */
@@ -574,7 +576,7 @@ gcm_mode_decrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 		if (length < ctx->gcm_tag_len) {
 			/*
 			 * There isn't enough data ahead to constitute a full
-			 * auth tag, so crunch only one input block and copy
+			 * auth tag, so only crunch one input block and copy
 			 * the remainder of the input into our buffer.
 			 */
 			rv = gcm_process_contiguous_blocks(ctx,
@@ -649,7 +651,7 @@ gcm_decrypt_final(gcm_ctx_t *ctx, crypto_data_t *out, size_t block_size,
 	GCM_ACCEL_ENTER;
 
 	/* Finish any unprocessed input */
-	if (ctx->gcm_last_input_fill - ctx->gcm_tag_len > 0) {
+	if (ctx->gcm_last_input_fill > ctx->gcm_tag_len) {
 		size_t last_blk_len = MIN(block_size,
 		    ctx->gcm_last_input_fill - ctx->gcm_tag_len);
 
@@ -673,7 +675,8 @@ gcm_decrypt_final(gcm_ctx_t *ctx, crypto_data_t *out, size_t block_size,
 		/* Finish last incomplete block before auth tag */
 		if (last_blk_len > 0) {
 			gcm_decrypt_incomplete_block(ctx, ctx->gcm_last_input,
-			    last_blk_len, out, encrypt_block, xor_block);
+			    last_blk_len, block_size, out, encrypt_block,
+			    xor_block);
 
 			ctx->gcm_processed_data_len += last_blk_len;
 			ctx->gcm_last_input_fill -= last_blk_len;
@@ -701,6 +704,7 @@ gcm_decrypt_final(gcm_ctx_t *ctx, crypto_data_t *out, size_t block_size,
 		return (SET_ERROR(CRYPTO_INVALID_MAC));
 
 	return (CRYPTO_SUCCESS);
+
 errout:
 	GCM_ACCEL_EXIT;
 	return (rv);
