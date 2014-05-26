@@ -926,10 +926,6 @@ aes_decrypt_final(crypto_ctx_t *ctx, crypto_data_t *data,
 		gcm_ctx_t *ctx = (gcm_ctx_t *)aes_ctx;
 		size_t pt_len = ctx->gcm_last_input_fill - ctx->gcm_tag_len;
 
-		cmn_err(CE_NOTE, "data->cd_length: %llu data->cd_offset: %llu, pt_len: %llu",
-		    (unsigned long long) data->cd_length,
-		    (unsigned long long) data->cd_offset,
-		    (unsigned long long) pt_len);
 		if (data->cd_length < pt_len) {
 			data->cd_length = pt_len;
 			return (CRYPTO_BUFFER_TOO_SMALL);
