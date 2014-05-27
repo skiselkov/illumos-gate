@@ -22,6 +22,9 @@
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 #ifndef _KERNEL
 #include <strings.h>
@@ -72,9 +75,9 @@ ctr_mode_contiguous_blocks(ctr_ctx_t *ctx, char *data, size_t length,
 	 * - output is a single contiguous region and doesn't alias input
 	 */
 	if (ctr_fastpath_enabled && cipher_ctr != NULL &&
-	    ctx->ctr_remainder_len == 0 && length % block_size == 0 &&
-	    htonll(ctx->ctr_cb[1]) <= ctx->ctr_lower_mask - length / block_size
-	    && CRYPTO_DATA_IS_SINGLE_BLOCK(out)) {
+	    ctx->ctr_remainder_len == 0 && (length & (block_size - 1)) == 0 &&
+	    ntohll(ctx->ctr_cb[1]) <= ctx->ctr_lower_mask -
+	    length / block_size && CRYPTO_DATA_IS_SINGLE_BLOCK(out)) {
 		cipher_ctr(ctx->ctr_keysched, (uint8_t *)data,
 		    CRYPTO_DATA_FIRST_BLOCK(out), length, ctx->ctr_cb);
 		out->cd_offset += length;

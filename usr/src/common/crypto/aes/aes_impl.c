@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
  */
 
 #include <sys/types.h>
@@ -1740,28 +1741,28 @@ aes_decrypt_block(const void *ks, const uint8_t *ct, uint8_t *pt)
 
 #ifdef	__amd64
 #define	ECB_INTEL_IMPL(enc_or_dec, in, out)				\
-    do {								\
-	if (intel_aes_instructions_present()) {				\
-		/* first use the wide-register accelerated function */	\
-		for (; i + 8 * AES_BLOCK_LEN <= length;			\
-		    i += 8 * AES_BLOCK_LEN)				\
-			aes_ ## enc_or_dec ## rypt_intel8(		\
-			    &ksch->enc_or_dec ## r_ks.ks32[0],		\
-			    ksch->nr, &in[i], &out[i]);			\
-		/* finish off the remainder with the per-block one */	\
-		ECB_LOOP(aes_ ## enc_or_dec ## rypt_intel, enc_or_dec,	\
-		    in, out);						\
-	} else {							\
-		ECB_LOOP(aes_ ## enc_or_dec ## rypt_amd64, enc_or_dec,	\
-		    in, out);						\
-	}								\
-	_NOTE(CONSTCOND)						\
-    } while (0)
+	do {								\
+		if (intel_aes_instructions_present()) {			\
+			/* first use the accelerated function */	\
+			for (; i + 8 * AES_BLOCK_LEN <= length;		\
+			    i += 8 * AES_BLOCK_LEN)			\
+				aes_ ## enc_or_dec ## rypt_intel8(	\
+				    &ksch->enc_or_dec ## r_ks.ks32[0],	\
+				    ksch->nr, &in[i], &out[i]);		\
+			/* finish off the remainder per-block */	\
+			ECB_LOOP(aes_ ## enc_or_dec ## rypt_intel,	\
+			    enc_or_dec,	in, out);			\
+		} else {						\
+			ECB_LOOP(aes_ ## enc_or_dec ## rypt_amd64,	\
+			    enc_or_dec, in, out);			\
+		}							\
+		_NOTE(CONSTCOND)					\
+	} while (0)
 #endif	/* __amd64 */
 
 /*
  * Perform AES ECB encryption on a sequence of blocks. On x86-64 CPUs with
- * the AES-NI extension, this perform the encryption in increments of 8
+ * the AES-NI extension, this performs the encryption in increments of 8
  * blocks at a time, exploiting instruction parallelism more efficiently.
  * On other platforms, this simply encrypts the blocks in sequence.
  */
@@ -1879,11 +1880,10 @@ aes_encrypt_cbc(const void *ks, const uint8_t *pt, uint8_t *ct,
  * Performs high-performance counter mode encryption and decryption on
  * a sequence of blocks. In CTR mode, encryption and decryption are the
  * same operation, just with the plaintext and ciphertext reversed:
- * plaintext = CTR(CTR(plaintext))
- * Moreover, in counter mode, blocks do not interdepend on each other,
- * so it is an excellent mode when high performance is required and
- * data authentication/integrity checking is provided via some other
- * means, or isn't necessary.
+ * plaintext = CTR(CTR(plaintext, K), K)
+ * Blocks also do not interdepend on each other, so it is an excellent
+ * mode when high performance is required and data authentication/integrity
+ * checking is provided via some other means, or isn't necessary.
  *
  * On x86-64 with the AES-NI extension, this code performs CTR mode
  * encryption in parallel on 8 blocks at a time and can provide in
@@ -1896,7 +1896,7 @@ aes_ctr_mode(const void *ks, const uint8_t *input, uint8_t *output,
 	aes_key_t *ksch = (aes_key_t *)ks;
 	uint64_t i = 0;
 
-	// swap lower part to little endian for computations
+	// swap lower part to host order for computations
 	counter[1] = ntohll(counter[1]);
 
 #ifdef	__amd64

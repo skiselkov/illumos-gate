@@ -21,6 +21,7 @@
 #
 # Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
+# Copyright 2014 by Saso Kiselkov. All rights reserved.
 #
 #	This makefile drives the production of the Kernel Cryptographic
 #	Framework core module.

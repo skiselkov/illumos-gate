@@ -148,6 +148,9 @@
  *
  * ====================================================================
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 #if defined(lint) || defined(__lint)
 
@@ -285,11 +288,10 @@ rijndael_key_setup_dec_intel(uint32_t rk[], const uint32_t cipherKey[],
 	mov	%rbp, %rsp; \
 	pop	%rbp
 
-#define	CR0_SAVED	0x100(%rdi)
 /*
  * void aes_accel_save(void *savestate);
  *
- * Saves all 15 XMM registers and CR0 to a temporary location pointed to
+ * Saves all 16 XMM registers and CR0 to a temporary location pointed to
  * in the first argument and clears TS in CR0. This must be invoked before
  * executing any floating point operations inside the kernel (and kernel
  * thread preemption must be disabled as well). The memory region to which
@@ -298,7 +300,7 @@ rijndael_key_setup_dec_intel(uint32_t rk[], const uint32_t cipherKey[],
  */
 ENTRY_NP(aes_accel_save)
 	movq	%cr0, %rax
-	movq	%rax, CR0_SAVED
+	movq	%rax, 0x100(%rdi)
 	testq	$CR0_TS, %rax
 	jnz	1f
 	movaps	%xmm0, 0x00(%rdi)
@@ -329,7 +331,7 @@ ENTRY_NP(aes_accel_save)
  * Restores the saved XMM and CR0.TS state from aes_accel_save.
  */
 ENTRY_NP(aes_accel_restore)
-	mov	CR0_SAVED, %rax
+	mov	0x100(%rdi), %rax
 	testq	$CR0_TS, %rax
 	jnz	1f
 	movaps	0x00(%rdi), %xmm0
@@ -481,10 +483,9 @@ ENTRY_NP(aes_xor_intel)
 /*
  * void aes_xor_intel8(const uint8_t *src, uint8_t *dst);
  *
- * XORs four pairs of consecutive unaligned 128-bit blocks from `src' and
+ * XORs eight pairs of consecutive unaligned 128-bit blocks from `src' and
  * 'dst' and stores the results at `dst'. The XOR is performed using FPU
- * registers, so make sure FPU state is saved when running this in the
- * kernel.
+ * registers, so make sure FPU state is saved when running this in the kernel.
  */
 ENTRY_NP(aes_xor_intel8)
 	movdqu	0x00(%rdi), %xmm0
@@ -1010,7 +1011,7 @@ ENTRY_NP(aes_decrypt_intel)
 	ret
 	SET_SIZE(aes_decrypt_intel)
 
-/* Does a parallel load of 8 input blocks into our AES state registers. */
+/* Does a pipelined load of eight input blocks into our AES state registers. */
 #define	AES_LOAD_INPUT_8BLOCKS		\
 	movups	0x00(%INP), %STATE0;	\
 	movups	0x10(%INP), %STATE1;	\
@@ -1021,7 +1022,7 @@ ENTRY_NP(aes_decrypt_intel)
 	movups	0x60(%INP), %STATE6;	\
 	movups	0x70(%INP), %STATE7;
 
-/* Does a parallel store of 8 AES state registers into the output. */
+/* Does a pipelined store of eight AES state registers to the output. */
 #define	AES_STORE_OUTPUT_8BLOCKS	\
 	movups	%STATE0, 0x00(%OUTP);	\
 	movups	%STATE1, 0x10(%OUTP);	\
@@ -1032,7 +1033,7 @@ ENTRY_NP(aes_decrypt_intel)
 	movups	%STATE6, 0x60(%OUTP);	\
 	movups	%STATE7, 0x70(%OUTP);
 
-/* Performs an instruction `op' with the key on all 8 AES state registers. */
+/* Performs a pipelined AES instruction with the key on all state registers. */
 #define	AES_KEY_STATE_OP_8BLOCKS(op)	\
 	op	%KEY, %STATE0;		\
 	op	%KEY, %STATE1;		\
@@ -1042,7 +1043,10 @@ ENTRY_NP(aes_decrypt_intel)
 	op	%KEY, %STATE5;		\
 	op	%KEY, %STATE6;		\
 	op	%KEY, %STATE7
-#define	AES_XOR_STATE_8BLOCKS	AES_KEY_STATE_OP_8BLOCKS(pxor)
+
+/* XOR all AES state regs with key to initiate encryption/decryption. */
+#define	AES_XOR_STATE_8BLOCKS		\
+	AES_KEY_STATE_OP_8BLOCKS(pxor)
 
 /*
  * Loads a round key from the key schedule offset `off' into the KEY
@@ -1057,7 +1061,7 @@ ENTRY_NP(aes_decrypt_intel)
  *	const void *plaintext, void *ciphertext)
  *
  * Same as aes_encrypt_intel, but performs the encryption operation on
- * 8 consecutive blocks in sequence, exploiting instruction parallelism.
+ * 8 independent blocks in sequence, exploiting instruction pipelining.
  * This function doesn't support the OpenSSL interface, it's only meant
  * for kernel use.
  */
@@ -1104,7 +1108,7 @@ ENTRY_NP(aes_encrypt_intel8)
  *	const void *ciphertext, void *plaintext)
  *
  * Same as aes_decrypt_intel, but performs the decryption operation on
- * 8 consecutive blocks in sequence, exploiting instruction parallelism.
+ * 8 independent blocks in sequence, exploiting instruction pipelining.
  * This function doesn't support the OpenSSL interface, it's only meant
  * for kernel use.
  */

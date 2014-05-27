@@ -22,6 +22,9 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 #ifndef	_AES_IMPL_H
 #define	_AES_IMPL_H
@@ -119,11 +122,11 @@ extern "C" {
  * thread preemption, so we need to operate on small-enough chunks to
  * prevent scheduling latency bubbles.
  * A typical 64-bit CPU can sustain around 300-400MB/s/core even in the
- * slowest encryption modes (CBC), which with 4k per run works out to ~10us
+ * slowest encryption modes (CBC), which with 32k per run works out to ~100us
  * per run. CPUs with AES-NI in fast modes (ECB, CTR, CBC decryption) can
  * easily sustain 3GB/s/core, so the latency potential essentially vanishes.
  */
-#define	AES_OPSZ	131072
+#define	AES_OPSZ	32768
 
 #if	defined(lint) || defined(__lint)
 #define	AES_ACCEL_SAVESTATE(name)	uint8_t name[16 * 16 + 8]

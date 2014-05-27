@@ -37,7 +37,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /*
- * Illumos port copyright 2014 by Saso Kiselkov.
+ * Copyright 2014 by Saso Kiselkov on Illumos port sections.
  */
 
 #if defined(lint) || defined(__lint)

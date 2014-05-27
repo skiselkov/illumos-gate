@@ -22,6 +22,9 @@
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 #ifndef _KERNEL
 #include <strings.h>
@@ -56,8 +59,8 @@ cbc_decrypt_fastpath(cbc_ctx_t *ctx, const uint8_t *data, size_t length,
 			decrypt(ctx->cbc_keysched, &data[i], &out[i]);
 	}
 
-	/* Use bulk XOR when available and we have enough data. */
-	if (xor_block_range && length >= 2 * block_size) {
+	/* Use bulk XOR when available. */
+	if (xor_block_range != NULL && length >= 2 * block_size) {
 		xor_block(iv, out);
 		xor_block_range(data, &out[block_size], length - block_size);
 	} else {
@@ -100,7 +103,7 @@ cbc_encrypt_contiguous_blocks(cbc_ctx_t *ctx, char *data, size_t length,
 	 *   we overwrite their input buffer (input/output aliasing allowed)
 	 */
 	if (cbc_fastpath_enabled && encrypt_cbc != NULL &&
-	    ctx->cbc_remainder_len == 0 && length % block_size == 0 &&
+	    ctx->cbc_remainder_len == 0 && (length & (block_size - 1)) == 0 &&
 	    (out == NULL || CRYPTO_DATA_IS_SINGLE_BLOCK(out))) {
 		if (out == NULL) {
 			encrypt_cbc(ctx->cbc_keysched, (uint8_t *)data,
@@ -252,8 +255,8 @@ cbc_decrypt_contiguous_blocks(cbc_ctx_t *ctx, char *data, size_t length,
 	 * - output is a single contiguous region and doesn't alias input
 	 */
 	if (cbc_fastpath_enabled && ctx->cbc_remainder_len == 0 &&
-	    length % block_size == 0 && CRYPTO_DATA_IS_SINGLE_BLOCK(out) &&
-	    decrypt_ecb != NULL) {
+	    (length & (block_size - 1)) == 0 &&
+	    CRYPTO_DATA_IS_SINGLE_BLOCK(out)) {
 		uint8_t *outp = CRYPTO_DATA_FIRST_BLOCK(out);
 
 		cbc_decrypt_fastpath(ctx, (uint8_t *)data, length, outp,

@@ -27,6 +27,9 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
 
 /*
  * Accelerated GHASH implementation with Intel PCLMULQDQ-NI
@@ -54,7 +57,7 @@
  * /usr/include/sys/asm_linkage.h, lint(1B) guards, and a dummy C function
  * definition for lint.
  *
- * 2. Formatted code, added comments, and added /includes and #defines.
+ * 2. Formatted code, added comments, and added #includes and #defines.
  *
  * 3. If bit CR0.TS is set, clear and set the TS bit, after and before
  * calling kpreempt_disable() and kpreempt_enable().
@@ -143,7 +146,6 @@ gcm_accel_restore(void *savestate)
 	.byte	15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 
 #ifdef	_KERNEL
-#define	CR0_SAVED	0x100(%rdi)	/* offset into savestate for CR0 */
 /*
  * void gcm_intel_save(void *savestate)
  *
@@ -156,7 +158,7 @@ gcm_accel_restore(void *savestate)
  */
 ENTRY_NP(gcm_accel_save)
 	movq	%cr0, %rax
-	movq	%rax, CR0_SAVED
+	movq	%rax, 0x100(%rdi)
 	testq	$CR0_TS, %rax
 	jnz	1f
 	/* FPU is in use, save registers */
@@ -188,7 +190,7 @@ ENTRY_NP(gcm_accel_save)
  * Restores the saved XMM and CR0.TS state from aes_accel_save.
  */
 ENTRY_NP(gcm_accel_restore)
-	movq	CR0_SAVED, %rax
+	movq	0x100(%rdi), %rax
 	testq	$CR0_TS, %rax
 	jnz	1f
 	movaps	0x00(%rdi), %xmm0

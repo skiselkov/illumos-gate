@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
  */
 
 
@@ -45,16 +46,12 @@
 #include <sys/sdt.h>		/* SET_ERROR */
 #endif	/* _KERNEL */
 
-#define	PRINT_BLOCK(name, x)	cmn_err(CE_NOTE, name ": %016llx%016llx", \
-	(unsigned long long) ntohll(x[0]), (unsigned long long) ntohll(x[1]))
-
 #ifdef __amd64
 
 #ifdef _KERNEL
 #include <sys/cpuvar.h>		/* cpu_t, CPU */
 #include <sys/x86_archext.h>	/* x86_featureset, X86FSET_*, CPUID_* */
 #include <sys/disp.h>		/* kpreempt_disable(), kpreempt_enable */
-
 /* Workaround for no XMM kernel thread save/restore */
 extern void gcm_accel_save(void *savestate);
 extern void gcm_accel_restore(void *savestate);
@@ -176,7 +173,6 @@ gcm_mul(uint64_t *x_in, uint64_t *y, uint64_t *res)
 	} while (0)
 
 boolean_t gcm_fastpath_enabled = B_TRUE;
-boolean_t gcm_fast_enabled = B_TRUE;
 
 static void
 gcm_fastpath128(gcm_ctx_t *ctx, const uint8_t *data, size_t length,
@@ -186,6 +182,7 @@ gcm_fastpath128(gcm_ctx_t *ctx, const uint8_t *data, size_t length,
     int (*cipher_ctr)(const void *, const uint8_t *, uint8_t *, uint64_t,
     uint64_t *))
 {
+	/* When decrypting, `data' holds the ciphertext we need to GHASH. */
 	if (!encrypt) {
 #ifdef	__amd64
 		if (intel_pclmulqdq_instruction_present())
@@ -193,9 +190,8 @@ gcm_fastpath128(gcm_ctx_t *ctx, const uint8_t *data, size_t length,
 			    data, length);
 		else
 #endif	/* __amd64 */
-			for (size_t i = 0; i < length; i += 16) {
+			for (size_t i = 0; i < length; i += 16)
 				GHASH(ctx, &data[i], ctx->gcm_ghash);
-		}
 	}
 
 	if (cipher_ctr != NULL) {
@@ -228,6 +224,7 @@ gcm_fastpath128(gcm_ctx_t *ctx, const uint8_t *data, size_t length,
 		ctx->gcm_cb[1] = htonll(counter);
 	}
 
+	/* When encrypting, `out' holds the ciphertext we need to GHASH. */
 	if (encrypt) {
 #ifdef	__amd64
 		if (intel_pclmulqdq_instruction_present())
@@ -238,7 +235,7 @@ gcm_fastpath128(gcm_ctx_t *ctx, const uint8_t *data, size_t length,
 			for (size_t i = 0; i < length; i += 16)
 				GHASH(ctx, &out[i], ctx->gcm_ghash);
 
-		/* Copy a potential auth tag into the temp buffer */
+		/* If no more data comes in, the last block is the auth tag. */
 		bcopy(&out[length - 16], ctx->gcm_tmp, 16);
 	}
 
@@ -279,7 +276,7 @@ gcm_process_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 	 * - output is a single contiguous region and doesn't alias input
 	 */
 	if (gcm_fastpath_enabled && block_size == 16 &&
-	    ctx->gcm_remainder_len == 0 && length % block_size == 0 &&
+	    ctx->gcm_remainder_len == 0 && (length & (block_size - 1)) == 0 &&
 	    ntohll(ctx->gcm_cb[1] & counter_mask) <= ntohll(counter_mask) -
 	    length / block_size && CRYPTO_DATA_IS_SINGLE_BLOCK(out)) {
 		gcm_fastpath128(ctx, (uint8_t *)data, length,
@@ -321,6 +318,7 @@ gcm_process_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 			blockp = datap;
 		}
 
+		/* add ciphertext to the hash */
 		if (!encrypt)
 			GHASH(ctx, blockp, ctx->gcm_ghash);
 
@@ -511,7 +509,7 @@ gcm_decrypt_incomplete_block(gcm_ctx_t *ctx, uint8_t *data, size_t length,
 
 	/* padd last block and add to GHASH */
 	bcopy(data, ctx->gcm_tmp, length);
-	bzero(((uint8_t*)ctx->gcm_tmp) + length,
+	bzero(((uint8_t *)ctx->gcm_tmp) + length,
 	    sizeof (ctx->gcm_tmp) - length);
 	GHASH(ctx, ctx->gcm_tmp, ctx->gcm_ghash);
 
@@ -550,7 +548,6 @@ gcm_mode_decrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
     int (*cipher_ctr)(const void *, const uint8_t *, uint8_t *, uint64_t,
     uint64_t *))
 {
-	size_t to_copy;
 	int rv = CRYPTO_SUCCESS;
 
 	GCM_ACCEL_ENTER;
@@ -562,14 +559,16 @@ gcm_mode_decrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 	 */
 	if (ctx->gcm_last_input_fill > 0) {
 		/* Try to complete the input buffer */
-		to_copy = MIN(sizeof (ctx->gcm_last_input), length);
+		size_t to_copy = MIN(length,
+		    sizeof (ctx->gcm_last_input) - ctx->gcm_last_input_fill);
+
 		bcopy(data, ctx->gcm_last_input + ctx->gcm_last_input_fill,
 		    to_copy);
 		data += to_copy;
 		ctx->gcm_last_input_fill += to_copy;
 		length -= to_copy;
 
-		if (ctx->gcm_last_input_fill < block_size + ctx->gcm_tag_len)
+		if (ctx->gcm_last_input_fill < sizeof (ctx->gcm_last_input))
 			/* Not enough input data to continue */
 			goto out;
 
@@ -588,12 +587,15 @@ gcm_mode_decrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 			ctx->gcm_last_input_fill -= block_size;
 			bcopy(ctx->gcm_last_input + block_size,
 			    ctx->gcm_last_input, ctx->gcm_last_input_fill);
-			bcopy(ctx->gcm_last_input + block_size, data, length);
+			bcopy(data, ctx->gcm_last_input +
+			    ctx->gcm_last_input_fill, length);
+			ctx->gcm_last_input_fill += length;
+			/* No more input left */
 			goto out;
 		}
 		/*
-		 * There is enough data ahead to be the auth tag, so crunch
-		 * everything in our buffer now.
+		 * There is enough data ahead for the auth tag, so crunch
+		 * everything in our buffer now and empty it.
 		 */
 		rv = gcm_process_contiguous_blocks(ctx,
 		    (char *)ctx->gcm_last_input, ctx->gcm_last_input_fill,
@@ -604,28 +606,28 @@ gcm_mode_decrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 		ctx->gcm_last_input_fill = 0;
 	}
 	/*
-	 * Last input buffer is empty now and there is enough input data
-	 * ahead to constitute an auth tag, so crunch all the buffers in
-	 * between.
+	 * Last input buffer is empty, so what's left ahead is block-aligned.
+	 * Crunch all the blocks up until the near end, which might be our
+	 * auth tag and we must NOT decrypt.
 	 */
-	ASSERT(ctx->gcm_last_input_fill == 0 && length >= ctx->gcm_tag_len);
-	if (length > ctx->gcm_tag_len) {
-		to_copy = ((length - ctx->gcm_tag_len) / block_size) *
-		    block_size;
-		rv = gcm_process_contiguous_blocks(ctx, data, to_copy, out,
+	ASSERT(ctx->gcm_last_input_fill == 0);
+	if (length >= block_size + ctx->gcm_tag_len) {
+		size_t to_decrypt = (length - ctx->gcm_tag_len) &
+		    ~(block_size - 1);
+
+		rv = gcm_process_contiguous_blocks(ctx, data, to_decrypt, out,
 		    block_size, B_FALSE, encrypt_block, copy_block, xor_block,
 		    cipher_ctr);
 		if (rv != CRYPTO_SUCCESS)
 			goto out;
-		data += to_copy;
-		length -= to_copy;
+		data += to_decrypt;
+		length -= to_decrypt;
 	}
 	/*
 	 * Copy the remainder into our input buffer, it's potentially
-	 * the auth tag.
+	 * the auth tag and a last partial block.
 	 */
-	ASSERT(length >= ctx->gcm_tag_len &&
-	    length <= sizeof (ctx->gcm_last_input));
+	ASSERT(length < sizeof (ctx->gcm_last_input));
 	bcopy(data, ctx->gcm_last_input, length);
 	ctx->gcm_last_input_fill += length;
 out:
