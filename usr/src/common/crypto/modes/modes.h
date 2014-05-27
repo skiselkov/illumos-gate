@@ -190,21 +190,28 @@ typedef struct ccm_ctx {
  *			Length of processed plaintext (encrypt) or
  *			length of processed ciphertext (decrypt).
  *
- * gcm_pt_buf:		Stores the decrypted plaintext returned by
- *			decrypt_final when the computed authentication
- *			tag matches the	user supplied tag.
- *
- * gcm_pt_buf_len:	Length of the plaintext buffer.
- *
  * gcm_H:		Subkey.
  *
+ * gcm_H_table:		Pipelined Karatsuba multipliers.
+ *
  * gcm_J0:		Pre-counter block generated from the IV.
+ *
+ * gcm_tmp:		Temp storage for ciphertext when padding is needed.
  *
  * gcm_len_a_len_c:	64-bit representations of the bit lengths of
  *			AAD and ciphertext.
  *
  * gcm_kmflag:		Current value of kmflag. Used only for allocating
  *			the plaintext buffer during decryption.
+ *
+ * gcm_last_input:	Buffer of (up to) two last blocks. This is used when
+ *			input is not block-aligned and to temporarily hold
+ *			the end of the ciphertext stream during decryption,
+ *			since that could potentially be the GHASH auth tag
+ *			which we must check in the final() call instead of
+ *			decrypting it.
+ *
+ * gcm_last_input_fill:	Number of bytes actually stored in gcm_last_input.
  */
 typedef struct gcm_ctx {
 	struct common_ctx gcm_common;
@@ -213,7 +220,7 @@ typedef struct gcm_ctx {
 	uint64_t gcm_ghash[2];
 	uint64_t gcm_H[2];
 #ifdef	__amd64
-	uint8_t gcm_H_table[256];	/* pipelined Karatsuba multipliers */
+	uint8_t gcm_H_table[256];
 #endif
 	uint64_t gcm_J0[2];
 	uint64_t gcm_tmp[2];
@@ -500,7 +507,10 @@ crypto_get_ptrs(crypto_data_t *out, void **iov_or_mp, offset_t *current_offset,
 	(cd != NULL && (cd->cd_format == CRYPTO_DATA_RAW || \
 	(cd->cd_format == CRYPTO_DATA_UIO && cd->cd_uio->uio_iovcnt == 1) || \
 	(cd->cd_format == CRYPTO_DATA_MBLK && cd->cd_mp->b_next == NULL)))
-/* Returns the first contiguous data buffer in a crypto_data_t object. */
+
+/*
+ * Returns the first contiguous data buffer in a crypto_data_t object.
+ */
 #define	CRYPTO_DATA_FIRST_BLOCK(cd) \
 	(cd->cd_format == CRYPTO_DATA_RAW ? \
 	(void *)(cd->cd_raw.iov_base + cd->cd_offset) : \
