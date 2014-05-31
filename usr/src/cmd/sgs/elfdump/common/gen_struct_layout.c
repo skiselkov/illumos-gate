@@ -23,6 +23,20 @@
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright 2014 by Saso Kiselkov. All rights reserved.
+ */
+
+#define	_STRUCTURED_PROC 1
+#include "../../../../uts/common/sys/procfs.h"
+#if	defined(__i386) || defined(__amd64)
+#include "../../../../uts/intel/sys/old_procfs.h"
+#elif	defined(__sparc)
+#include "../../../../uts/sparc/sys/old_procfs.h"
+#else
+#error "Machine architecture not i386/amd64/sparc? Missing old_procfs.h"
+#endif	/* !__i386 && !__amd64 && !__sparc */
+#undef	_STRUCTURED_PROC
 
 #include <stdlib.h>
 #include <stddef.h>
@@ -34,9 +48,7 @@
 #include <unistd.h>
 #include <sys/sysmacros.h>
 #include <sys/corectl.h>
-#include <procfs.h>
 #include <sys/auxv.h>
-#include <sys/old_procfs.h>
 #include <sys/utsname.h>
 
 
