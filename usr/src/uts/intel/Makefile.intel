@@ -392,6 +392,7 @@ DRV_KMODS	+= igb
 DRV_KMODS	+= ipmi
 DRV_KMODS	+= iprb
 DRV_KMODS	+= ixgbe
+DRV_KMODS	+= sfxge
 DRV_KMODS	+= vr
 
 #

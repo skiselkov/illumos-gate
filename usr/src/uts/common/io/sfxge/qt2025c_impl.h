@@ -1,0 +1,248 @@
+/*-
+ * Copyright 2008-2013 Solarflare Communications Inc.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#ifndef	_SYS_QT2025C_IMPL_H
+#define	_SYS_QT2025C_IMPL_H
+
+#ifdef	__cplusplus
+extern "C" {
+#endif
+
+#if EFSYS_OPT_PHY_QT2025C
+
+#define	QT2025C_MMD_MASK						\
+	    ((1 << PMA_PMD_MMD) |					\
+	    (1 << PCS_MMD) |						\
+	    (1 << PHY_XS_MMD))
+
+/* PMA/PMD */
+
+#define	MDIO_RESETS_REG 0xc300
+#define	KRDLL_RESETN_LBN 0
+#define	KRDLL_RESETN_WIDTH 1
+#define	MICRO_RESETN_LBN 1
+#define	MICRO_RESETN_WIDTH 1
+#define	EDC_RESETN_LBN 2
+#define	EDC_RESETN_WIDTH 1
+#define	PSDLL_RESETN_LBN 3
+#define	PSDLL_RESETN_WIDTH 1
+#define	PRDLL_RESETN_LBN 4
+#define	PRDLL_RESETN_WIDTH 1
+#define	RESLRN_RESETN_LBN 5
+#define	RESLRN_RESETN_WIDTH 1
+#define	IB_TX_RESETN_LBN 6
+#define	IB_TX_RESETN_WIDTH 1
+#define	IB_RX_RESETN_LBN 7
+#define	IB_RX_RESETN_WIDTH 1
+#define	SINUS_RESETN_LBN 8
+#define	SINUS_RESETN_WIDTH 1
+
+#define	PMA_UC8051_CFG_REG 0xc302
+#define	EREFCLK_FREQ_LBN 0
+#define	EREFCLK_FREQ_WIDTH 1
+#define	EREFCLK_FREQ_156_25_DECODE 0
+#define	EREFCLK_FREQ_52_08_DECODE 1
+#define	SREFCLK_FREQ_LBN 1
+#define	SREFCLK_FREQ_WIDTH 1
+#define	SREFCLK_FREQ_155_52_DECODE 0
+#define	SREFCLK_FREQ_51_84_DECODE 1
+#define	UC_CLK_SEL_LBN 2
+#define	UC_CLK_SEL_WIDTH 3
+#define	UC_CLK_156_25_DECODE 1
+#define	EEPROM_BOOT_MODE_LBN 5
+#define	EEPROM_BOOT_MODE_WIDTH 1
+#define	EEPROM_BOOT_0_DECODE 0
+#define	EEPROM_BOOT_1K_DECODE 1
+#define	UC_JTAG_CTRL_LBN 6
+#define	UC_JTAG_CTRL_WIDTH 1
+
+#define	PMA_FTX_CTRL2_REG 0xc309
+#define	FTX_STATIC_LBN 13
+#define	FTX_STATIC_WIDTH 1
+
+#define	PMA_UC8051_I2C_FREQ_REG 0xc316
+#define	UC_I2C_DIV_LBN 0
+#define	UC_I2C_DIV_WIDTH 8
+
+#define	PMA_UC8051_I2C_SLV_ADDR_REG 0xc318
+#define	UC_I2C_SLV_ADDR_LBN 0
+#define	UC_I2C_SLV_ADDR_WIDTH 7
+
+#define	PMA_UC8051_SPARE2_REG 0xc319
+#define	DISABLE_PORT_LBN 1
+#define	DISABLE_PORT_WIDTH 1
+#define	OP_MODE_CONFIG_LBN 3
+#define	OP_MODE_CONFIG_WIDTH 3
+#define	OP_MODE_LINEAR_DECODE 0
+#define	OP_MODE_LIMITING_DECODE 1
+#define	OP_MODE_KR_DECODE 2
+#define	OP_MODE_DIRECT_DECODE 4
+#define	OP_MODE_LOW_POWER_DECODE 5
+#define	OP_MODE_AUTO_DECODE 7
+#define	DATA_RATE_LBN 7
+#define	DATA_RATE_WIDTH 1
+#define	DATA_RATE_10G_DECODE 0
+#define	DATA_RATE_1_25G_DECODE 1
+
+#define	PMA_UC8051_SPARE3_REG 0xc31a
+#define	XDRV_OVRD_LBN 1
+#define	XDRV_OVRD_WIDTH 1
+#define	FTX_OVRD_LBN 2
+#define	FTX_OVRD_WIDTH 1
+#define	MODULE_TYPE_LBN 3
+#define	MODULE_TYPE_WIDTH 3
+#define	MODULE_TYPE_X2_DECODE 1
+#define	MODULE_TYPE_XFP_DECODE 2
+#define	MODULE_TYPE_SFP_DECODE 3
+
+#define	PRD_CODE1_REG 0xd000
+#define	PRODUCT_CODE_LBN 0
+#define	PRODUCT_CODE_WIDTH 16
+
+#define	PMA_PMD_LED1_REG 0xd006	/* Green */
+#define	PMA_PMD_LED2_REG 0xd007	/* Amber */
+#define	PMA_PMD_LED3_REG 0xd008 /* Red */
+
+#define	PMA_PMD_LED_CFG_LBN 0
+#define	PMA_PMD_LED_CFG_WIDTH 3
+#define	LED_CFG_LS_DECODE 0x1
+#define	LED_CFG_LA_DECODE 0x2
+#define	LED_CFG_LSA_DECODE 0x3
+#define	LED_CFG_OFF_DECODE 0x4
+#define	LED_CFG_ON_DECODE 0x5
+#define	PMA_PMD_LED_PATH_LBN 3
+#define	PMA_PMD_LED_PATH_WIDTH 1
+#define	LED_PATH_TX_DECODE 0x0
+#define	LED_PATH_RX_DECODE 0x1
+
+/* PCS */
+
+#define	KR_BYPASS_CTRL_REG 0x0026
+#define	FREEZE_DIS_LBN 8
+#define	FREEZE_DIS_WIDTH 8
+#define	FREEZE_DIS_DECODE 0x0e
+
+#define	BOOT_CTRL_REG 0x0027
+#define	LED1_CTRL_LBN 0
+#define	LED1_CTRL_WIDTH 1
+#define	LED1_CTRL_FW_DECODE 0
+#define	LED1_CTRL_HW_DECODE 1
+#define	FTX_FR4_LOSS_LBN 1
+#define	FTX_FR4_LOSS_WIDTH 3
+#define	FRX_FR4_LOSS_LBN 4
+#define	FRX_FR4_LOSS_WIDTH 3
+#define	GE_PRBS_MODE_LBN 15
+#define	GE_PRBS_MODE_WIDTH 1
+
+#define	FW_CFG_REG 0x0028
+#define	FW_CFG_KEY_LBN 0
+#define	FW_CFG_KEY_WIDTH 16
+#define	FW_CFG_KEY_DECODE 0xa528
+
+#define	MICRO_RAM1_BASE	0x8000
+#define	MICRO_RAM1_SIZE	0x4000
+
+#define	OP_MODE_REG 0xd70c
+#define	OP_MODE_CURRENT_LBN 0
+#define	OP_MODE_CURRENT_WIDTH 4
+
+#define	LED_CFG_REG 0xd70d
+#define	LED3_CFG_LBN 0
+#define	LED3_CFG_WIDTH 2
+#define	LED2_CFG_LBN 2
+#define	LED2_CFG_WIDTH 2
+#define	LED1_CFG_LBN 4
+#define	LED1_CFG_WIDTH 2
+#define	LED_RXTX_DECODE 3
+#define	LED_RX_DECODE 2
+#define	LED_TX_DECODE 1
+#define	LED_ON_DECODE 0
+
+#define	CKSUM_STATUS1_REG 0xd716
+#define	CKSUM_STATUS1_BYTE_LBN 0
+#define	CKSUM_STATUS1_BYTE_WIDTH 1
+#define	CKSUM_STATUS1_BYTE_BAD_DECODE 0xde
+
+#define	CKSUM_STATUS2_REG 0xd717
+#define	CKSUM_STATUS2_BYTE_LBN 0
+#define	CKSUM_STATUS2_BYTE_WIDTH 1
+#define	CKSUM_STATUS2_BYTE_BAD_DECODE 0xad
+
+#define	FW_HEARTBEAT_REG 0xd7ee
+#define	FW_HEARTB_LBN 0
+#define	FW_HEARTB_WIDTH 8
+
+#define	FW_VERSION1_REG 0xd7f3
+#define	FW_VERSION2_REG 0xd7f4
+#define	FW_VERSION3_REG 0xd7f5
+
+#define	FW_BUILD1_REG 0xd7f6
+#define	FW_BUILD2_REG 0xd7f7
+#define	FW_BUILD3_REG 0xd7f8
+
+#define	UC8051_STATUS_REG 0xd7fd
+#define	UC_STATUS_LBN 0
+#define	UC_STATUS_WIDTH 8
+#define	UC_STATUS_INVALID_DECODE 0x00
+#define	UC_STATUS_FW_START_DECODE 0x10
+#define	UC_STATUS_FW_SAVE_DECODE 0x20
+#define	UC_STATUS_INIT_DECODE 0x40
+#define	UC_STATUS_AQ_IN_PROG_DECODE 0x50
+#define	UC_STATUS_AQ_COMPLETE_DECODE 0x60
+#define	UC_STATUS_TRACK_IN_PROG_DECODE 0x70
+#define	UC_STATUS_IN_AN_DECODE 0xa0
+
+#define	MICRO_GEN_CTL_REG 0xe854
+#define	UC_INT0_CNT_LBN 0
+#define	UC_INT0_CNT_WIDTH 1
+#define	UC_INT1_CNT_LBN 1
+#define	UC_INT1_CNT_WIDTH 1
+#define	UC_MDIO_SW_LBN 3
+#define	UC_MDIO_SW_WIDTH 1
+#define	UC_DIS_ROM_LBN 4
+#define	UC_DIS_ROM_WIDTH 1
+#define	UC_UPDATE_LBN 5
+#define	UC_UPDATE_WIDTH 1
+#define	UC_RUN_RAM_LBN 6
+#define	UC_RUN_RAM_WIDTH 1
+#define	UC_RST_LBN 7
+#define	UC_RST_WIDTH 1
+
+/* PHY_XS */
+
+#define	XGXS_VENDOR_SPECIFIC_1_REG 0xc000
+#define	XGXS_SYSLPBK_LBN 14
+#define	XGXS_SYSLPBK_WIDTH 1
+
+#define	MICRO_RAM2_BASE	0x8000
+#define	MICRO_RAM2_SIZE	0x2000
+
+#endif	/* EFSYS_OPT_PHY_QT2025C */
+
+#ifdef	__cplusplus
+}
+#endif
+
+#endif	/* _SYS_QT2025C_IMPL_H */

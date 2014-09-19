@@ -1802,6 +1802,20 @@ PCN_OBJS += pcn.o
 
 RGE_OBJS += rge_main.o rge_chip.o rge_ndd.o rge_kstats.o rge_log.o rge_rxtx.o
 
+SFXGE_OBJS += efx_bootcfg.o efx_ev.o efx_intr.o efx_mac.o efx_mcdi.o efx_mon.o \
+		efx_nic.o efx_nvram.o efx_phy.o efx_port.o efx_rx.o efx_sram.o \
+		efx_tx.o efx_vpd.o efx_wol.o falcon_gmac.o falcon_i2c.o \
+		falcon_mac.o falcon_mdio.o falcon_nic.o falcon_nvram.o \
+		falcon_spi.o falcon_sram.o falcon_vpd.o falcon_xmac.o lm87.o \
+		max6647.o nullmon.o nullphy.o qt2022c2.o qt2025c.o sft9001.o \
+		sfx7101.o sfxge_bar.o sfxge_dma.o sfxge_err.o sfxge_ev.o \
+		sfxge_gld_ndd.o sfxge_gld_v2.o sfxge_gld_v3.o sfxge_intr.o \
+		sfxge_mac.o sfxge_mcdi.o sfxge_mon.o sfxge_nvram.o sfxge_pci.o \
+		sfxge_phy.o sfxge_rx.o sfxge_sram.o sfxge_tcp.o sfxge_tx.o \
+		sfxge_vpd.o sfxge.o siena_mac.o siena_mon.o siena_nic.o \
+		siena_nvram.o siena_phy.o siena_sram.o siena_vpd.o txc43128.o \
+		xphy.o
+
 URTW_OBJS += urtw.o
 
 ARN_OBJS += arn_hw.o arn_eeprom.o arn_mac.o arn_calib.o arn_ani.o arn_phy.o arn_regd.o arn_beacon.o \
