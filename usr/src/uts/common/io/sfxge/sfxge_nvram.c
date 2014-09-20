@@ -71,6 +71,7 @@ fail1:
 }
 
 
+/*ARGSUSED*/
 int
 sfxge_nvram_erase(sfxge_t *sp, sfxge_nvram_ioc_t *snip, efx_nvram_type_t type)
 {
@@ -148,6 +149,7 @@ sfxge_nvram_ioctl(sfxge_t *sp, sfxge_nvram_ioc_t *snip)
 		size_t size;
 		if ((rc = efx_nvram_size(enp, type, &size)) != 0)
 			goto fail3;
+		/* LINTED(E_ASSIGN_NARROW_CONV) */
 		snip->sni_size = size;
 		break;
 	}

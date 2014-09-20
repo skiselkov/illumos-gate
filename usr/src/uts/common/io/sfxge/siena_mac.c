@@ -133,7 +133,7 @@ siena_mac_reconfigure(
 	req.emr_out_buf = NULL;
 	req.emr_out_length = 0;
 
-	memcpy(MCDI_IN2(req, uint8_t, SET_MCAST_HASH_IN_HASH0),
+	(void) memcpy(MCDI_IN2(req, uint8_t, SET_MCAST_HASH_IN_HASH0),
 	    epp->ep_multicst_hash, sizeof (epp->ep_multicst_hash));
 	if (epp->ep_brdcst)
 		EFX_SET_OWORD_BIT(*MCDI_IN2(req, efx_oword_t,

@@ -233,7 +233,7 @@ sfxge_intr_bus_enable(sfxge_t *sp)
 			    " err=%d (h=%p idx=%d nalloc=%d)\n",
 			    ddi_driver_name(sp->s_dip),
 			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table[add_index], add_index,
+			    err, (void *)sip->si_table[add_index], add_index,
 			    sip->si_nalloc);
 
 			rc = (err == DDI_EINVAL) ? EINVAL : EFAULT;
@@ -249,7 +249,7 @@ sfxge_intr_bus_enable(sfxge_t *sp)
 		    " err=%d (h=%p idx=%d nalloc=%d)\n",
 		    ddi_driver_name(sp->s_dip),
 		    ddi_get_instance(sp->s_dip),
-		    err, sip->si_table[0], 0, sip->si_nalloc);
+		    err, (void *)sip->si_table[0], 0, sip->si_nalloc);
 
 		if (err == DDI_EINVAL)
 			rc = EINVAL;
@@ -271,7 +271,7 @@ sfxge_intr_bus_enable(sfxge_t *sp)
 			    " err=%d (table=%p nalloc=%d)\n",
 			    ddi_driver_name(sp->s_dip),
 			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table, sip->si_nalloc);
+			    err, (void *)sip->si_table, sip->si_nalloc);
 
 			rc = (err == DDI_EINVAL) ? EINVAL : EFAULT;
 			goto fail4;
@@ -285,8 +285,8 @@ sfxge_intr_bus_enable(sfxge_t *sp)
 				    " err=%d (h=%p idx=%d nalloc=%d)\n",
 				    ddi_driver_name(sp->s_dip),
 				    ddi_get_instance(sp->s_dip),
-				    err, sip->si_table[en_index], en_index,
-				    sip->si_nalloc);
+				    err, (void *)sip->si_table[en_index],
+				    en_index, sip->si_nalloc);
 
 				rc = (err == DDI_EINVAL) ? EINVAL : EFAULT;
 				goto fail4;
@@ -310,8 +310,8 @@ fail4:
 				    " failed err=%d (h=%p idx=%d nalloc=%d)\n",
 				    ddi_driver_name(sp->s_dip),
 				    ddi_get_instance(sp->s_dip),
-				    err, sip->si_table[en_index], en_index,
-				    sip->si_nalloc);
+				    err, (void *)sip->si_table[en_index],
+				    en_index, sip->si_nalloc);
 			}
 		}
 	}
@@ -334,7 +334,7 @@ fail2:
 			    " failed err=%d (h=%p idx=%d nalloc=%d)\n",
 			    ddi_driver_name(sp->s_dip),
 			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table[add_index], add_index,
+			    err, (void *)sip->si_table[add_index], add_index,
 			    sip->si_nalloc);
 		}
 	}
@@ -365,7 +365,7 @@ sfxge_intr_bus_disable(sfxge_t *sp)
 			    " failed err=%d (table=%p nalloc=%d)\n",
 			    ddi_driver_name(sp->s_dip),
 			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table, sip->si_nalloc);
+			    err, (void *)sip->si_table, sip->si_nalloc);
 		}
 	} else {
 		index = sip->si_nalloc;
@@ -377,7 +377,7 @@ sfxge_intr_bus_disable(sfxge_t *sp)
 				    " failed err=%d (h=%p idx=%d nalloc=%d)\n",
 				    ddi_driver_name(sp->s_dip),
 				    ddi_get_instance(sp->s_dip),
-				    err, sip->si_table[index], index,
+				    err, (void *)sip->si_table[index], index,
 				    sip->si_nalloc);
 			}
 		}
@@ -395,7 +395,7 @@ sfxge_intr_bus_disable(sfxge_t *sp)
 			    " failed err=%d (h=%p idx=%d nalloc=%d)\n",
 			    ddi_driver_name(sp->s_dip),
 			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table[index], index,
+			    err, (void *)sip->si_table[index], index,
 			    sip->si_nalloc);
 		}
 	}
@@ -669,7 +669,8 @@ sfxge_intr_init(sfxge_t *sp)
 	sip->si_intr_pri = 0;
 	for (index = 0; index < sip->si_nalloc; index++) {
 		int pri;
-		if ((rc = ddi_intr_get_pri(sip->si_table[index], &pri)) !=  0)
+		if ((rc = ddi_intr_get_pri(sip->si_table[index],
+		    (unsigned *)&pri)) !=  0)
 			goto fail5;
 		if (pri > sip->si_intr_pri)
 			sip->si_intr_pri = pri;
@@ -696,7 +697,8 @@ fail4:
 			    " (h=%p idx=%d nalloc=%d)\n",
 			    ddi_driver_name(sp->s_dip),
 			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table[index], index, sip->si_nalloc);
+			    err, (void *)sip->si_table[index], index,
+			    sip->si_nalloc);
 		}
 		sip->si_table[index] = NULL;
 	}
@@ -806,7 +808,8 @@ sfxge_intr_fini(sfxge_t *sp)
 			    " (h=%p idx=%d nalloc=%d)\n",
 			    ddi_driver_name(sp->s_dip),
 			    ddi_get_instance(sp->s_dip),
-			    err, sip->si_table[index], index, sip->si_nalloc);
+			    err, (void *)sip->si_table[index], index,
+			    sip->si_nalloc);
 		}
 		sip->si_table[index] = NULL;
 	}

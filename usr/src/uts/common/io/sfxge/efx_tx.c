@@ -279,7 +279,7 @@ efx_tx_qflush(
 
 	EFSYS_ASSERT3U(etp->et_magic, ==, EFX_TXQ_MAGIC);
 
-	efx_tx_qpace(etp, 0);
+	(void) efx_tx_qpace(etp, 0);
 
 	label = etp->et_index;
 

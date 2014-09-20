@@ -58,7 +58,7 @@ sfxge_vpd_get_keyword(sfxge_t *sp, sfxge_vpd_ioc_t *svip)
 
 	svip->svi_len = vpd.evv_length;
 	EFX_STATIC_ASSERT(sizeof (svip->svi_payload) == sizeof (vpd.evv_value));
-	memcpy(svip->svi_payload, &vpd.evv_value[0],
+	(void) memcpy(svip->svi_payload, &vpd.evv_value[0],
 	    sizeof (svip->svi_payload));
 
 	kmem_free(buf, size);
@@ -111,7 +111,7 @@ sfxge_vpd_set_keyword(sfxge_t *sp, sfxge_vpd_ioc_t *svip)
 	vpd.evv_length = svip->svi_len;
 
 	EFX_STATIC_ASSERT(sizeof (svip->svi_payload) == sizeof (vpd.evv_value));
-	memcpy(&vpd.evv_value[0], svip->svi_payload,
+	(void) memcpy(&vpd.evv_value[0], svip->svi_payload,
 	    sizeof (svip->svi_payload));
 
 	if ((rc = efx_vpd_set(enp, buf, size, &vpd)) != 0)

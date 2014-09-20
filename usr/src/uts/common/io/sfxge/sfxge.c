@@ -146,6 +146,7 @@ sfxge_create(dev_info_t *dip, sfxge_t **spp)
 	if (!(IS_POW2(rxq_size)))
 		rxq_size = SFXGE_DEFAULT_RXQ_SIZE;
 	rxq_size = min(rxq_size, EFX_RXQ_MAXNDESCS);
+	/* LINTED(E_ASSIGN_NARROW_CONV) */
 	sp->s_rxq_size = max(rxq_size, EFX_RXQ_MINNDESCS);
 
 	/* Configure polling interval for queue refill/trim */
@@ -447,7 +448,7 @@ sfxge_stop_locked(sfxge_t *sp)
 	sfxge_sram_stop(sp);
 
 	efx_nic_fini(sp->s_enp);
-	efx_nic_reset(sp->s_enp);
+	(void) efx_nic_reset(sp->s_enp);
 
 	ASSERT3U(sp->s_state, ==, SFXGE_STOPPING);
 	sp->s_state = SFXGE_REGISTERED;
@@ -905,7 +906,7 @@ _sfxge_vpd_kstat_init(sfxge_t *sp, caddr_t vpd, size_t size, efx_vpd_tag_t tag,
 
 	if (efx_vpd_get(enp, vpd, size, evvp) != 0) {
 		evvp->evv_length = strlen(unknown) + 1;
-		memcpy(evvp->evv_value, unknown, evvp->evv_length);
+		(void) memcpy(evvp->evv_value, unknown, evvp->evv_length);
 	}
 
 	knp = &(svkp->svk_stat[type]);

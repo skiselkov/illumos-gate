@@ -145,6 +145,7 @@ typedef struct efx_port_s {
 	uint32_t		ep_default_adv_cap_mask;
 	uint32_t		ep_phy_cap_mask;
 #if EFSYS_OPT_PHY_TXC43128 || EFSYS_OPT_PHY_QT2025C
+	/* LINTED(E_ANONYMOUS_UNION_DECL) */
 	union {
 		struct {
 			unsigned int	bug10934_count;

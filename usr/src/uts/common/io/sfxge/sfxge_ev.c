@@ -703,6 +703,7 @@ sfxge_ev_qinit(sfxge_t *sp, unsigned int index, unsigned int ev_batch)
 		goto fail1;
 
 	sep->se_state = SFXGE_EVQ_INITIALIZED;
+	/* LINTED(E_ASSIGN_NARROW_CONV) */
 	sep->se_ev_batch = ev_batch;
 	sp->s_sep[index] = sep;
 

@@ -199,6 +199,7 @@ falcon_nvram_bootrom_get_version(
 	char buf[16], p;
 	size_t current, needle;
 	uint16_t *versionp;
+	/* LINTED(E_FUNC_SET_NOT_USED) */
 	int rc;
 
 	version[0] = version[1] = version[2] = version[3] = 0;

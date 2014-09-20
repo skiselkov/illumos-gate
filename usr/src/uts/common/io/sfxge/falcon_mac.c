@@ -211,7 +211,7 @@ falcon_mac_wrapper_enable(
 	/* Push multicast hash. Set the broadcast bit (0xff) appropriately */
 	EFX_BAR_WRITEO(enp, FR_AB_MAC_MC_HASH0_REG,
 	    &(epp->ep_multicst_hash[0]));
-	memcpy(&oword, &(epp->ep_multicst_hash[1]), sizeof (oword));
+	(void) memcpy(&oword, &(epp->ep_multicst_hash[1]), sizeof (oword));
 	if (epp->ep_brdcst)
 		EFX_SET_OWORD_BIT(oword, 0x7f);
 	EFX_BAR_WRITEO(enp, FR_AB_MAC_MC_HASH1_REG, &oword);

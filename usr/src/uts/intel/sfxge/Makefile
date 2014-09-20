@@ -52,6 +52,10 @@ include $(UTSBASE)/intel/Makefile.intel
 CERRWARN	+= -_gcc=-Wno-parentheses
 CERRWARN	+= -_gcc=-Wno-switch
 CERRWARN	+= -_gcc=-Wno-uninitialized
+CERRWARN	+= -_gcc=-Wno-type-limits
+CERRWARN	+= -_gcc=-Wno-pointer-sign
+CERRWARN	+= -_gcc=-Wno-unused-variable
+CERRWARN	+= -_gcc=-Wno-unused-function
 
 #
 #	Define targets
@@ -80,6 +84,17 @@ CFLAGS    += -D_USE_GLD_V3_PROPS
 CFLAGS    += -U_USE_MTU_UPDATE
 CFLAGS    += -D_USE_NDD_PROPS
 
+LINTFLAGS += -D_USE_DESBALLOC
+LINTFLAGS += -U_USE_XESBALLOC
+LINTFLAGS += -U_USE_CPU_PHYSID
+LINTFLAGS += -U_USE_GLD_V2
+LINTFLAGS += -D_USE_GLD_V3
+LINTFLAGS += -D_USE_GLD_V3_SOL10
+LINTFLAGS += -D_USE_GLD_V3_SOL11
+LINTFLAGS += -D_USE_MAC_PRIV_PROP
+LINTFLAGS += -D_USE_GLD_V3_PROPS
+LINTFLAGS += -U_USE_MTU_UPDATE
+LINTFLAGS += -D_USE_NDD_PROPS
 
 #
 #	Default build targets.

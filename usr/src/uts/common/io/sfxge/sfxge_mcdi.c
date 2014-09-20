@@ -286,7 +286,7 @@ sfxge_mcdi_ioctl(sfxge_t *sp, sfxge_mcdi_ioc_t *smip)
 	smip->smi_rc = (uint8_t)emr.emr_rc;
 	smip->smi_cmd = (uint8_t)emr.emr_cmd;
 	smip->smi_len = (uint8_t)emr.emr_out_length_used;
-	memcpy(smip->smi_payload, out, smip->smi_len);
+	(void) memcpy(smip->smi_payload, out, smip->smi_len);
 
 	/*
 	 * Helpfully trigger a device reset in response to an MCDI_CMD_REBOOT

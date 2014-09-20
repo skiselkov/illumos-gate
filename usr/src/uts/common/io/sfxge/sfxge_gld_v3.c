@@ -72,6 +72,7 @@ sfxge_gld_link_update(sfxge_t *sp)
 	mac_link_update(sp->s_mh, link);
 }
 
+/*ARGSUSED*/
 void
 sfxge_gld_mtu_update(sfxge_t *sp)
 {
@@ -417,6 +418,7 @@ static void
 sfxge_gld_ioctl(void *arg, queue_t *wq, mblk_t *mp)
 {
 	sfxge_t *sp = arg;
+	/* LINTED(E_BAD_PTR_CAST_ALIGN) */
 	struct iocblk *iocp = (struct iocblk *)mp->b_rptr;
 
 	switch (iocp->ioc_cmd) {
@@ -677,7 +679,7 @@ sfxge_gld_priv_prop_set(sfxge_t *sp, const char *name, unsigned int size,
 	}
 
 	if (strcmp(name, SFXGE_PRIV_PROP_NAME(intr_moderation)) == 0) {
-		if ((rc = sfxge_ev_moderation_set(sp, (unsigned int) val) != 0))
+		if ((rc = sfxge_ev_moderation_set(sp, (unsigned int) val)) != 0)
 			goto fail1;
 
 		goto done;
@@ -869,6 +871,7 @@ sfxge_gld_getprop(void *arg, const char *name, mac_prop_id_t id,
 	default:
 		rc = ENOTSUP;
 		goto fail1;
+		_NOTE(NOTREACHED)
 		break;
 	}
 
@@ -990,6 +993,7 @@ sfxge_gld_getprop(void *arg, const char *name, mac_prop_id_t id,
 	default:
 		rc = ENOTSUP;
 		goto fail3;
+		_NOTE(NOTREACHED)
 		break;
 	}
 
@@ -1062,6 +1066,7 @@ sfxge_gld_setprop(void *arg, const char *name, mac_prop_id_t id,
 	default:
 		rc = ENOTSUP;
 		goto fail1;
+		_NOTE(NOTREACHED)
 		break;
 	}
 
@@ -1149,6 +1154,7 @@ sfxge_gld_setprop(void *arg, const char *name, mac_prop_id_t id,
 		default:
 			rc = EINVAL;
 			goto fail2;
+			_NOTE(NOTREACHED)
 			break;
 		}
 

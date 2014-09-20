@@ -366,6 +366,7 @@ efx_ev_tx(
 	return (B_FALSE);
 }
 
+/*ARGSUSED*/
 static	__checkReturn	boolean_t
 efx_ev_global(
 	__in		efx_evq_t *eep,

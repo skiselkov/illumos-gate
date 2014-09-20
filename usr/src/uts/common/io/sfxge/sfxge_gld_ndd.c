@@ -398,6 +398,7 @@ fail1:
 static int
 sfxge_gld_nd_get_ioctl(queue_t *q, mblk_t *mp, caddr_t arg, cred_t *credp)
 {
+	/* LINTED(E_BAD_PTR_CAST_ALIGN) */
 	sfxge_ndd_param_t *snpp = (sfxge_ndd_param_t *)arg;
 	sfxge_t *sp = snpp->snp_sp;
 	unsigned int id = snpp->snp_id;
@@ -419,6 +420,7 @@ fail1:
 	return (rc);
 }
 #else
+/*ARGSUSED*/
 static int
 sfxge_gld_nd_get_ioctl(queue_t *q, mblk_t *mp, caddr_t arg, cred_t *credp)
 {
@@ -670,6 +672,7 @@ static int
 sfxge_gld_nd_set_ioctl(queue_t *q, mblk_t *mp, char *valp, caddr_t arg,
     cred_t *credp)
 {
+	/* LINTED(E_BAD_PTR_CAST_ALIGN) */
 	sfxge_ndd_param_t *snpp = (sfxge_ndd_param_t *)arg;
 	sfxge_t *sp = snpp->snp_sp;
 	unsigned int id = snpp->snp_id;
@@ -691,6 +694,7 @@ fail1:
 	return (rc);
 }
 #else
+/*ARGSUSED*/
 static int
 sfxge_gld_nd_set_ioctl(queue_t *q, mblk_t *mp, char *valp, caddr_t arg,
     cred_t *credp)

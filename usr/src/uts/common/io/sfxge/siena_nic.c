@@ -418,7 +418,7 @@ siena_phy_cfg(
 #endif	/* EFSYS_OPT_NAMES */
 	(void) memset(encp->enc_phy_revision, 0,
 	    sizeof (encp->enc_phy_revision));
-	memcpy(encp->enc_phy_revision,
+	(void) memcpy(encp->enc_phy_revision,
 		MCDI_OUT2(req, char, GET_PHY_CFG_OUT_REVISION),
 		MIN(sizeof (encp->enc_phy_revision) - 1,
 		    MC_CMD_GET_PHY_CFG_OUT_REVISION_LEN));

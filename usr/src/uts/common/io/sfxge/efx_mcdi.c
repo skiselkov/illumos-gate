@@ -107,7 +107,7 @@ efx_mcdi_request_start(
 	EFX_BAR_TBL_WRITED(enp, FR_CZ_MC_TREG_SMEM, pdur, &dword, B_TRUE);
 
 	for (pos = 0; pos < emrp->emr_in_length; pos += sizeof (efx_dword_t)) {
-		memcpy(&dword, MCDI_IN(*emrp, efx_dword_t, pos),
+		(void) memcpy(&dword, MCDI_IN(*emrp, efx_dword_t, pos),
 		    MIN(sizeof (dword), emrp->emr_in_length - pos));
 		EFX_BAR_TBL_WRITED(enp, FR_CZ_MC_TREG_SMEM,
 		    pdur + 1 + (pos >> 2), &dword, B_FALSE);
@@ -139,7 +139,7 @@ efx_mcdi_request_copyout(
 		for (pos = 0; pos < bytes; pos += sizeof (efx_dword_t)) {
 			EFX_BAR_TBL_READD(enp, FR_CZ_MC_TREG_SMEM,
 			    pdur + 1 + (pos >> 2), &data, B_FALSE);
-			memcpy(MCDI_OUT(*emrp, efx_dword_t, pos), &data,
+			(void) memcpy(MCDI_OUT(*emrp, efx_dword_t, pos), &data,
 			    MIN(sizeof (data), bytes - pos));
 		}
 	}
@@ -301,7 +301,7 @@ efx_mcdi_request_poll(
 	    EFX_DWORD_FIELD(dword, MCDI_HEADER_DATALEN) == 0) {
 		/* Consume status word */
 		EFSYS_SPIN(MCDI_STATUS_SLEEP_US);
-		efx_mcdi_poll_reboot(enp);
+		(void) efx_mcdi_poll_reboot(enp);
 		EFSYS_UNLOCK(enp->en_eslp, state);
 		rc = EIO;
 		goto fail2;
@@ -566,7 +566,7 @@ version:
 
 out:
 	if (versionp != NULL)
-		memcpy(versionp, version, sizeof (version));
+		(void) memcpy(versionp, version, sizeof (version));
 	if (buildp != NULL)
 		*buildp = build;
 	if (statusp != NULL)

@@ -238,7 +238,7 @@ sfxge_rx_qctor(void *buf, void *arg, int kmflags)
 	/* Preallocate some packets on the free packet pool */
 	nprealloc = ddi_prop_get_int(DDI_DEV_T_ANY, sp->s_dip,
 	    DDI_PROP_DONTPASS, "rx_prealloc_pkt_buffers", SFXGE_RX_QPREALLOC);
-	sfxge_rx_qpreallocate(srp, nprealloc);
+	(void) sfxge_rx_qpreallocate(srp, nprealloc);
 
 
 	return (0);
@@ -2060,7 +2060,7 @@ sfxge_rx_qstop(sfxge_t *sp, unsigned int index)
 			/* Timeout waiting for successful flush */
 			dev_info_t *dip = sp->s_dip;
 
-				ddi_driver_name(sp->s_dip),
+			(void) ddi_driver_name(sp->s_dip),
 			cmn_err(CE_NOTE,
 			    SFXGE_CMN_ERR "[%s%d] rxq[%d] flush timeout",
 			    ddi_driver_name(dip), ddi_get_instance(dip), index);
@@ -2656,6 +2656,7 @@ int
 sfxge_rx_init(sfxge_t *sp)
 {
 	sfxge_intr_t *sip = &(sp->s_intr);
+	/* LINTED(E_FUNC_SET_NOT_USED) */
 	const efx_nic_cfg_t *encp;
 	char name[MAXNAMELEN];
 	int index;
@@ -2888,6 +2889,7 @@ sfxge_rx_stop(sfxge_t *sp)
 	sfxge_mac_t *smp = &(sp->s_mac);
 	sfxge_intr_t *sip = &(sp->s_intr);
 	efx_nic_t *enp = sp->s_enp;
+	/* LINTED(E_FUNC_SET_NOT_USED) */
 	const efx_nic_cfg_t *encp;
 	int index;
 
@@ -2940,6 +2942,7 @@ void
 sfxge_rx_fini(sfxge_t *sp)
 {
 	sfxge_intr_t *sip = &(sp->s_intr);
+	/* LINTED(E_FUNC_SET_NOT_USED) */
 	const efx_nic_cfg_t *encp;
 	int index;
 

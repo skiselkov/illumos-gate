@@ -411,7 +411,7 @@ efx_mac_hash_set(
 	EFSYS_ASSERT3U(enp->en_magic, ==, EFX_NIC_MAGIC);
 	EFSYS_ASSERT3U(enp->en_mod_flags, &, EFX_MOD_PORT);
 
-	memcpy(old_hash, epp->ep_multicst_hash, sizeof (old_hash));
+	(void) memcpy(old_hash, epp->ep_multicst_hash, sizeof (old_hash));
 
 	/* Set the lower 128 bits of the hash */
 	EFX_ZERO_OWORD(epp->ep_multicst_hash[0]);
@@ -435,7 +435,7 @@ efx_mac_hash_set(
 fail1:
 	EFSYS_PROBE1(fail1, int, rc);
 
-	memcpy(epp->ep_multicst_hash, old_hash, sizeof (old_hash));
+	(void) memcpy(epp->ep_multicst_hash, old_hash, sizeof (old_hash));
 
 	return (rc);
 }

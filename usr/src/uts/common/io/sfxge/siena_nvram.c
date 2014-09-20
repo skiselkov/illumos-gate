@@ -157,7 +157,7 @@ siena_nvram_partn_read(
 			goto fail2;
 		}
 
-		memcpy(data,
+		(void) memcpy(data,
 		    MCDI_OUT2(req, uint8_t, NVRAM_READ_OUT_READ_BUFFER),
 		    chunk);
 
@@ -240,8 +240,8 @@ siena_nvram_partn_write(
 		MCDI_IN_SET_DWORD(req, NVRAM_WRITE_IN_OFFSET, offset);
 		MCDI_IN_SET_DWORD(req, NVRAM_WRITE_IN_LENGTH, chunk);
 
-		memcpy(MCDI_IN2(req, uint8_t, NVRAM_WRITE_IN_WRITE_BUFFER),
-		    data, chunk);
+		(void) memcpy(MCDI_IN2(req, uint8_t,
+		    NVRAM_WRITE_IN_WRITE_BUFFER), data, chunk);
 
 		efx_mcdi_execute(enp, &req);
 
@@ -703,7 +703,7 @@ siena_nvram_get_version(
 		temp[3] = EFX_WORD_FIELD(dcfg->fw_version[partn].version_z,
 			    EFX_WORD_0);
 		if (memcmp(version, temp, sizeof (temp)) < 0)
-			memcpy(version, temp, sizeof (temp));
+			(void) memcpy(version, temp, sizeof (temp));
 
 	done:
 		EFSYS_KMEM_FREE(enp->en_esip, length, dcfg);

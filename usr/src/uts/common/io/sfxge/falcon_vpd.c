@@ -54,7 +54,7 @@ falcon_vpd_dimension(
 
 #if EFSYS_OPT_FALCON_NIC_CFG_OVERRIDE
 	if (enp->en_u.falcon.enu_forced_cfg != NULL) {
-		memcpy(&oword, (enp->en_u.falcon.enu_forced_cfg
+		(void) memcpy(&oword, (enp->en_u.falcon.enu_forced_cfg
 				+ EE_VPD_CFG0_REG_SF_OFST), sizeof (oword));
 	}
 	else
@@ -194,7 +194,7 @@ falcon_vpd_get(
 
 	/* Copy out */
 	evvp->evv_length = length;
-	memcpy(evvp->evv_value, data + offset, length);
+	(void) memcpy(evvp->evv_value, data + offset, length);
 
 	return (0);
 
@@ -254,7 +254,7 @@ falcon_vpd_next(
 		goto fail1;
 
 	/* Copyout */
-	memcpy(evvp->evv_value, data + offset, evvp->evv_length);
+	(void) memcpy(evvp->evv_value, data + offset, evvp->evv_length);
 
 	return (0);
 

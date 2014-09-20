@@ -72,6 +72,7 @@ _sfxge_mac_stat_update(sfxge_mac_t *smp, int tries, int delay_usec)
 {
 	sfxge_t *sp = smp->sm_sp;
 	efsys_mem_t *esmp = &(smp->sm_mem);
+	/* LINTED(E_FUNC_SET_NOT_USED) */
 	int rc, i;
 
 	ASSERT(mutex_owned(&(smp->sm_lock)));

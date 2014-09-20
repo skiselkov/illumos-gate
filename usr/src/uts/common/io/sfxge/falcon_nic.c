@@ -84,7 +84,7 @@ falcon_nic_cfg_raw_read(
 
 #if EFSYS_OPT_FALCON_NIC_CFG_OVERRIDE
 	if (enp->en_u.falcon.enu_forced_cfg != NULL) {
-		memcpy(cfg, enp->en_u.falcon.enu_forced_cfg + offset, size);
+		(void) memcpy(cfg, enp->en_u.falcon.enu_forced_cfg + offset, size);
 		return (0);
 	}
 #endif	/* EFSYS_OPT_FALCON_NIC_CFG_OVERRIDE */
