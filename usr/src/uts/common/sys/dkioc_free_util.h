@@ -1,26 +1,16 @@
 /*
- * CDDL HEADER START
+ * This file and its contents are supplied under the terms of the
+ * Common Development and Distribution License ("CDDL"), version 1.0.
+ * You may only use this file in accordance with the terms of version
+ * 1.0 of the CDDL.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
- *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensource.org/licenses/CDDL-1.0.
- * See the License for the specific language governing permissions
- * and limitations under the License.
- *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
- *
- * CDDL HEADER END
+ * A full copy of the text of the CDDL should have accompanied this
+ * source.  A copy of the CDDL is also available via the Internet at
+ * http://www.illumos.org/license/CDDL.
  */
 
 /*
- * Copyright 2014 Saso Kiselkov.  All rights reserved.
+ * Copyright 2015 Nexenta Inc.  All rights reserved.
  */
 
 #ifndef _SYS_DKIOC_FREE_UTIL_H
@@ -32,29 +22,38 @@
 extern "C" {
 #endif
 
-static dkioc_free_list_t *
-dfl_new(int kmflags, int dkioc_free_flags)
+static inline dkioc_free_list_t *
+dfl_copyin(void *arg, int ddi_flags, int kmflags)
 {
-	dkioc_free_list_t *dfl = kmem_zalloc(sizeof (*dfl), kmflags);
-	dfl->dfl_flags = dkioc_free_flags;
+	dkioc_free_list_t *dfl;
+	dkioc_free_list_ext_t *dfl_in_exts;
+
+	dfl = kmem_alloc(sizeof (*dfl), kmflags);
+	if (dfl == NULL || ddi_copyin((void *)arg, dfl, sizeof (*dfl),
+	    ddi_flags)) {
+		kmem_free(dfl, sizeof (*dfl));
+		return (NULL);
+	}
+
+	dfl_in_exts = dfl->dfl_exts;
+	dfl->dfl_exts = kmem_alloc(dfl->dfl_num_exts * sizeof (*dfl->dfl_exts),
+	    KM_SLEEP);
+	if (dfl->dfl_exts == NULL || ddi_copyin(dfl_in_exts, dfl->dfl_exts,
+	    dfl->dfl_num_exts * sizeof (*dfl->dfl_exts), ddi_flags)) {
+		kmem_free(dfl->dfl_exts, dfl->dfl_num_exts *
+		    sizeof (*dfl->dfl_exts));
+		kmem_free(dfl, sizeof (*dfl));
+		return (NULL);
+	}
+
 	return (dfl);
 }
 
-static void
-dfl_destroy(dkioc_free_list_t *dfl)
+static inline void
+dfl_copyin_destroy(dkioc_free_list_t *dfl)
 {
+	kmem_free(dfl->dfl_exts, sizeof (*dfl->dfl_exts) * dfl->dfl_num_exts);
 	kmem_free(dfl, sizeof (*dfl));
-}
-
-static void
-dfl_append(dkioc_free_list_t *dfl, diskaddr_t start, diskaddr_t length)
-{
-	VERIFY3U(dfl->dfl_num_exts, <, DFL_MAX_EXTENTS);
-	ASSERT3U(length, <=, UINT32_MAX * DEV_BSIZE);
-
-	dfl->dfl_exts[dfl->dfl_num_exts].ext_start = start;
-	dfl->dfl_exts[dfl->dfl_num_exts].ext_length = length;
-	dfl->dfl_num_exts++;
 }
 
 #ifdef	__cplusplus

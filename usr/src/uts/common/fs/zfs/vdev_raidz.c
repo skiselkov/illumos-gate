@@ -2388,32 +2388,84 @@ static void
 vdev_raidz_trim(vdev_t *vd, zio_t *pio, void *trim_exts)
 {
 	dkioc_free_list_t *dfl = trim_exts;
-	dkioc_free_list_t *sub_dfl[vd->vdev_children];
+	dkioc_free_list_t **sub_dfl;
+	uint64_t *num_subexts;
 
-	for (int i = 0; i < vd->vdev_children; i++)
-		sub_dfl[i] = dfl_new(KM_SLEEP, dfl->dfl_flags);
+	sub_dfl = kmem_zalloc(sizeof (*sub_dfl) * vd->vdev_children, KM_SLEEP);
+	num_subexts = kmem_zalloc(sizeof (*num_subexts) * vd->vdev_children,
+	    KM_SLEEP);
+	for (int i = 0; i < vd->vdev_children; i++) {
+		sub_dfl[i] = kmem_zalloc(sizeof (**sub_dfl), KM_SLEEP);
+		sub_dfl[i]->dfl_flags = dfl->dfl_flags;
+		sub_dfl[i]->dfl_exts = kmem_zalloc(
+		    sizeof (*sub_dfl[i]->dfl_exts) * dfl->dfl_num_exts,
+		    KM_SLEEP);
+	}
 
 	/*
 	 * Process all extents and redistribute them to the component vdevs
 	 * according to a computed raidz map geometry.
 	 */
 	for (int i = 0; i < dfl->dfl_num_exts; i++) {
-		uint64_t start = dfl->dfl_exts[i].ext_start;
-		uint64_t length = dfl->dfl_exts[i].ext_length;
+		uint64_t start = dfl->dfl_exts[i].dfle_start;
+		uint64_t length = dfl->dfl_exts[i].dfle_length;
 		raidz_map_t *rm = vdev_raidz_map_alloc(NULL, length, start,
 		    vd->vdev_top->vdev_ashift, vd->vdev_children,
 		    vd->vdev_nparity, B_FALSE);
 
-		for (int i = 0; i < rm->rm_cols; i++) {
-			const raidz_col_t *rc = &rm->rm_col[i];
-			dfl_append(sub_dfl[rc->rc_devidx], rc->rc_offset,
-			    rc->rc_size);
+		for (int j = 0; j < rm->rm_cols; j++) {
+			const raidz_col_t *rc = &rm->rm_col[j];
+
+			sub_dfl[rc->rc_devidx]->dfl_exts[i].dfle_start =
+			    rc->rc_offset;
+			sub_dfl[rc->rc_devidx]->dfl_exts[i].dfle_length =
+			    rc->rc_size;
+			ASSERT(rc->rc_size != 0);
+			/*
+			 * Actual numbers of extents required to be trimmed on
+			 * each component device may be smaller (but not
+			 * larger!) than the total number of extents in the
+			 * original list. To account for this, we count the
+			 * actual number of extents required per device and
+			 * then, if the number is less than what we used in
+			 * dfl_num_exts, we "realloc" with the real required
+			 * length and copy over only the extents with a
+			 * non-zero length.
+			 */
+			num_subexts[rc->rc_devidx]++;
 		}
 		vdev_raidz_map_free(rm);
 	}
 
 	/*
-	 * Issue the component ioctls as children of the parent pio.
+	 * Now figure out which devices needed fewer extents than we had
+	 * originally anticipated.
+	 */
+	for (int i = 0; i < vd->vdev_children; i++) {
+		ASSERT3U(num_subexts[i], <=, dfl->dfl_num_exts);
+		if (num_subexts[i] < dfl->dfl_num_exts) {
+			dkioc_free_list_ext_t *new_exts = kmem_zalloc(
+			    sizeof (*new_exts) * num_subexts[i], KM_SLEEP);
+
+			for (int j = 0, k = 0; j < dfl->dfl_num_exts; j++) {
+				if (sub_dfl[i]->dfl_exts[i].dfle_length != 0) {
+					bcopy(&new_exts[k],
+					    &sub_dfl[i]->dfl_exts[i],
+					    sizeof (*new_exts));
+					k++;
+				}
+			}
+			kmem_free(sub_dfl[i]->dfl_exts,
+			    sizeof (*sub_dfl[i]->dfl_exts) * dfl->dfl_num_exts);
+			sub_dfl[i]->dfl_exts = new_exts;
+			sub_dfl[i]->dfl_num_exts = num_subexts[i];
+		}
+	}
+
+	kmem_free(num_subexts, sizeof (*num_subexts) * vd->vdev_children);
+
+	/*
+	 * Issue the component ioctls as children of the parent zio.
 	 */
 	for (int i = 0; i < vd->vdev_children; i++) {
 		if (sub_dfl[i]->dfl_num_exts != 0) {
@@ -2423,9 +2475,10 @@ vdev_raidz_trim(vdev_t *vd, zio_t *pio, void *trim_exts)
 			    ZIO_FLAG_CANFAIL | ZIO_FLAG_DONT_PROPAGATE |
 			    ZIO_FLAG_DONT_RETRY));
 		} else {
-			dfl_destroy(sub_dfl[i]);
+			kmem_free(sub_dfl[i], sizeof (*sub_dfl));
 		}
 	}
+	kmem_free(sub_dfl, sizeof (*sub_dfl) * vd->vdev_children);
 }
 
 /*
@@ -2437,7 +2490,8 @@ vdev_raidz_trim_done(zio_t *zio)
 {
 	dkioc_free_list_t *dfl = zio->io_private;
 	ASSERT(dfl != NULL);
-	dfl_destroy(dfl);
+	kmem_free(dfl->dfl_exts, sizeof (*dfl->dfl_exts) * dfl->dfl_num_exts);
+	kmem_free(dfl, sizeof (*dfl));
 }
 
 vdev_ops_t vdev_raidz_ops = {

@@ -102,26 +102,9 @@ int zio_buf_debug_limit = 0;
  * Tunable to allow for debugging SCSI Unmap/SATA TRIM calls. Disabling
  * it will prevent ZFS from attempting to issue DKIOCFREE ioctls to the
  * underlying storage. Synchronous write performance may degrade over
- * time with zfs_trim unset.
+ * time with zfs_trim set to B_FALSE.
  */
-boolean_t zfs_trim = B_TRUE;
-
-/*
- * At most how many extents we pass in a single UNMAP/TRIM command. If we need
- * to trim more extents, we will split these up between multiple commands.
- * Please note that this is constrained by the underlying command syntax
- * (see DFL_MAX_EXTENTS in sys/dkio.h).
- */
-int zfs_max_exts_per_trim = 1024;
-
-/*
- * Maximum size of a single extent handed to Unmap/TRIM. If the extent we need
- * to trim is larger than this, it is split up into multiple extents of at
- * most this size. Please note that this is contrained by the underlying
- * command syntax. SCSI UNMAP supports extents at most 2^32 * block_size in
- * length.
- */
-uint64_t zfs_max_extent_size_per_trim_ext = UINT32_MAX * DEV_BSIZE;
+boolean_t zfs_trim = B_FALSE;	/* TODO: set to B_TRUE for shipping code */
 
 void
 zio_init(void)
@@ -930,8 +913,10 @@ zio_ioctl(zio_t *pio, spa_t *spa, vdev_t *vd, int cmd,
 static void
 zio_trim_done(zio_t *zio)
 {
-	VERIFY(zio->io_private != NULL);
-	dfl_destroy(zio->io_private);
+	dkioc_free_list_t *dfl = zio->io_private;
+	VERIFY(dfl != NULL);
+	kmem_free(dfl->dfl_exts, sizeof (*dfl->dfl_exts) * dfl->dfl_num_exts);
+	kmem_free(dfl, sizeof (*dfl));
 }
 
 /*
@@ -946,6 +931,8 @@ zio_trim(struct range_tree *tree, spa_t *spa, vdev_t *vd, zio_done_func_t *done,
 {
 	dkioc_free_list_t *dfl = NULL;
 	zio_t *pio = zio_root(spa, done, private, flags);
+	range_seg_t *rs;
+	uint64_t rs_idx;
 
 	ASSERT(range_tree_space(tree) != 0);
 	/*
@@ -955,54 +942,20 @@ zio_trim(struct range_tree *tree, spa_t *spa, vdev_t *vd, zio_done_func_t *done,
 	if (!zfs_trim || vd->vdev_notrim)
 		return (pio);
 
-	/*
-	 * Trim commands have a limit on the number of extents in them, so we
-	 * may need to issue multiple trims in order to consume the tree.
-	 */
-	for (range_seg_t *rs = avl_first(&tree->rt_root); rs != NULL;
-	    rs = AVL_NEXT(&tree->rt_root, rs)) {
-		uint64_t ext_start = rs->rs_start;
-		uint64_t ext_length = rs->rs_end - rs->rs_start;
+	dfl = kmem_zalloc(sizeof (*dfl), KM_SLEEP);
+	dfl->dfl_num_exts = avl_numnodes(&tree->rt_root);
+	dfl->dfl_exts = kmem_zalloc(sizeof (*dfl->dfl_exts) * dfl->dfl_num_exts,
+	    KM_SLEEP);
 
-		/*
-		 * Trim commands have a maximum extent length that can be
-		 * expressed, so we may need to split the range_seg.
-		 */
-		while (ext_length > 0) {
-			uint64_t len = MIN(ext_length,
-			    zfs_max_extent_size_per_trim_ext);
-
-			/* Start a new dkioc_free_list_t if necessary */
-			if (dfl == NULL)
-				dfl = dfl_new(KM_SLEEP, trim_flags);
-
-			dfl_append(dfl, ext_start, len);
-			ext_start += len;
-			ext_length -= len;
-
-			/*
-			 * Check number of extents per trim constraint and
-			 * issue the trim early if it has been reached.
-			 */
-			if (dfl->dfl_num_exts >= zfs_max_exts_per_trim ||
-			    dfl->dfl_num_exts == DFL_MAX_EXTENTS) {
-				zio_nowait(zio_ioctl(pio, spa, vd, DKIOCFREE,
-				    zio_trim_done, dfl, ZIO_FLAG_CANFAIL |
-				    ZIO_FLAG_DONT_PROPAGATE |
-				    ZIO_FLAG_DONT_RETRY));
-				dfl = NULL;
-			}
-		}
+	for (rs = avl_first(&tree->rt_root), rs_idx = 0; rs != NULL;
+	    rs = AVL_NEXT(&tree->rt_root, rs), rs_idx++) {
+		dfl->dfl_exts[rs_idx].dfle_start = rs->rs_start;
+		dfl->dfl_exts[rs_idx].dfle_length = rs->rs_end - rs->rs_start;
 	}
 
-	/* Issue the last trim command containing any remaining extents */
-	if (dfl != NULL) {
-		zio_nowait(zio_ioctl(pio, spa, vd, DKIOCFREE,
-		    zio_trim_done, dfl, ZIO_FLAG_CANFAIL |
-		    ZIO_FLAG_DONT_PROPAGATE | ZIO_FLAG_DONT_RETRY));
-	}
-
-	return (pio);
+	return (zio_ioctl(pio, spa, vd, DKIOCFREE,
+	    zio_trim_done, dfl, ZIO_FLAG_CANFAIL |
+	    ZIO_FLAG_DONT_PROPAGATE | ZIO_FLAG_DONT_RETRY));
 }
 
 zio_t *

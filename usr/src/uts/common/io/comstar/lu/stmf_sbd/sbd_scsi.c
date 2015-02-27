@@ -2622,7 +2622,7 @@ sbd_handle_unmap_xfer(scsi_task_t *task, uint8_t *buf, uint32_t buflen)
 	}
 
 	/* Finally execute the unmap operations in a single step */
-	ret = sbd_unmap(dfl, sl);
+	ret = sbd_unmap(sl, dfl);
 	dfl_destroy(dfl);
 	if (ret != 0) {
 		stmf_scsilib_send_status(task, STATUS_CHECK,

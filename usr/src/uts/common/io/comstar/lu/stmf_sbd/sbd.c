@@ -3694,7 +3694,7 @@ out:
  * which the caller is responsible for destroying.
  */
 int
-sbd_unmap(dkioc_free_list_t *dfl, sbd_lu_t *sl)
+sbd_unmap(sbd_lu_t *sl, dkioc_free_list_t *dfl)
 {
 	vnode_t *vp;
 	int unused, ret;

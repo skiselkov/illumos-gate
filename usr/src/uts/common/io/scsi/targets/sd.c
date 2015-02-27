@@ -21410,11 +21410,25 @@ done:
 	return (status);
 }
 
+typedef struct unmap_async_task_info_s {
+	int			uati_ncmds_executing;
+	kmutex_t		uati_mtx;
+	boolean_t		uati_is_async;
+	struct dk_callback	uati_dkc;
+	kcondvar_t		uati_cv;
+	int			uati_status;
+} unmap_async_task_info_t;
+
 typedef struct unmap_param_hdr_s {
 	uint16_t	uph_data_len;
 	uint16_t	uph_descr_data_len;
 	uint32_t	uph_reserved;
 } unmap_param_hdr_t;
+
+/* Max number of extents in list */
+#define	UNMAP_MAX_EXTENTS	(UINT16_MAX / 16)
+/* Max extent length */
+#define	UNMAP_MAX_EXT_LEN	(UINT32_MAX * DEV_BSIZE)
 
 typedef struct unmap_blk_descr_s {
 	uint64_t	ubd_lba;
@@ -21422,166 +21436,38 @@ typedef struct unmap_blk_descr_s {
 	uint32_t	ubd_reserved;
 } unmap_blk_descr_t;
 
-/*
- * Constructs and sends a SCSI UNMAP command from the list of extents to
- * be freed. The caller is responsible for freeing the passed extent list
- * (for calls from userspace, a local copy is automatically created and
- * destroyed).
- */
 static int
-sd_send_scsi_UNMAP(struct sd_lun *un, dkioc_free_list_t *dfl,
-    struct dk_callback *dkc, int flag)
+sd_send_scsi_UNMAP_taskdone(unmap_async_task_info_t *uati)
 {
-	struct sd_uscsi_info		*uip;
-	struct uscsi_cmd		*uscmd;
-	union scsi_cdb			*cdb;
-	struct buf			*bp;
-	int				rval = 0;
-	int				is_async;
-	unmap_param_hdr_t		*uph;
-	caddr_t				params;
-	size_t				param_size;
+	int status = uati->uati_status;
 
-	SD_TRACE(SD_LOG_IO, un, "sd_send_scsi_UNMAP: entry: un:0x%p\n", un);
-
-	ASSERT(un != NULL);
-	ASSERT(!mutex_owned(SD_MUTEX(un)));
-	ASSERT(dfl != NULL);
-
-	if (dkc == NULL || dkc->dkc_callback == NULL) {
-		is_async = FALSE;
-	} else {
-		is_async = TRUE;
+	ASSERT3S(uati->uati_ncmds_executing, ==, 0);
+	if (uati->uati_is_async) {
+		ASSERT(uati->uati_dkc.dkc_callback != NULL);
+		(*uati->uati_dkc.dkc_callback)(uati->uati_dkc.dkc_cookie,
+		    uati->uati_status);
 	}
+	mutex_destroy(&uati->uati_mtx);
+	cv_destroy(&uati->uati_cv);
+	kmem_free(uati, sizeof (*uati));
 
-	/*
-	 * For userspace calls we must copy in.
-	 */
-	if (!(flag & FKIOCTL)) {
-		dkioc_free_list_t *my_dfl = dfl_new(KM_SLEEP, 0);
-
-		if (ddi_copyin(dfl, my_dfl, sizeof (*dfl), 0) == -1) {
-			dfl_destroy(my_dfl);
-			return (SET_ERROR(EFAULT));
-		}
-		dfl = my_dfl;
-	}
-
-	/* Check limits */
-	if (dfl->dfl_num_exts > DFL_MAX_EXTENTS) {
-		if (!(flag & FKIOCTL))
-			dfl_destroy(dfl);
-		return (SET_ERROR(EINVAL));
-	}
-
-	/*
-	 * Serialize all extent data into an UNMAP parameter list.
-	 */
-	param_size = sizeof (unmap_param_hdr_t) +
-	    dfl->dfl_num_exts * sizeof (unmap_blk_descr_t);
-	params = kmem_zalloc(param_size, KM_SLEEP);
-
-	uph = (unmap_param_hdr_t *)params;
-	uph->uph_data_len = htons(param_size - 1);
-	uph->uph_descr_data_len = htons(param_size - 7);
-	for (int i = 0; i < dfl->dfl_num_exts; i++) {
-		/* Do some more checking here as well */
-		if (dfl->dfl_exts[i].ext_length > DFL_MAX_EXT_LEN) {
-			if (!(flag & FKIOCTL))
-				dfl_destroy(dfl);
-			return (SET_ERROR(EINVAL));
-		}
-		unmap_blk_descr_t *ubd = (unmap_blk_descr_t *)(params +
-		    sizeof (*uph) + (sizeof (*ubd) * i));
-
-		ubd->ubd_lba = htonll(dfl->dfl_exts[i].ext_start);
-		ubd->ubd_num_blks =
-		    htonl(dfl->dfl_exts[i].ext_length / DEV_BSIZE);
-	}
-
-	/* Command is serialized in data buf now, so discard any temp lists. */
-	if (!(flag & FKIOCTL)) {
-		dfl_destroy(dfl);
-		dfl = NULL;
-	}
-
-	cdb = kmem_zalloc(CDB_GROUP1, KM_SLEEP);
-	cdb->scc_cmd = SCMD_UNMAP;
-
-	/*
-	 * First get some memory for the uscsi_cmd struct and cdb
-	 * and initialize for UNMAP cmd.
-	 */
-	uscmd = kmem_zalloc(sizeof (struct uscsi_cmd), KM_SLEEP);
-	uscmd->uscsi_cdblen = CDB_GROUP1;
-	uscmd->uscsi_cdb = (caddr_t)cdb;
-	uscmd->uscsi_bufaddr = params;
-	uscmd->uscsi_buflen = param_size;
-	uscmd->uscsi_rqbuf = kmem_zalloc(SENSE_LENGTH, KM_SLEEP);
-	uscmd->uscsi_rqlen = SENSE_LENGTH;
-	uscmd->uscsi_rqresid = SENSE_LENGTH;
-	uscmd->uscsi_flags = USCSI_RQENABLE | USCSI_SILENT;
-	uscmd->uscsi_timeout = sd_io_time;
-
-	/*
-	 * Allocate an sd_uscsi_info struct and fill it with the info
-	 * needed by sd_initpkt_for_uscsi().  Then put the pointer into
-	 * b_private in the buf for sd_initpkt_for_uscsi().  Note that
-	 * since we allocate the buf here in this function, we do not
-	 * need to preserve the prior contents of b_private.
-	 * The sd_uscsi_info struct is also used by sd_uscsi_strategy()
-	 */
-	uip = kmem_zalloc(sizeof (struct sd_uscsi_info), KM_SLEEP);
-	uip->ui_flags = SD_PATH_DIRECT;
-	uip->ui_cmdp  = uscmd;
-
-	bp = getrbuf(KM_SLEEP);
-	bp->b_private = uip;
-
-	/*
-	 * Setup buffer to carry uscsi request.
-	 */
-	bp->b_flags  = B_BUSY;
-	bp->b_bcount = 0;
-	bp->b_blkno  = 0;
-
-	if (is_async == TRUE) {
-		bp->b_iodone = sd_send_scsi_UNMAP_biodone;
-		uip->ui_dkc = *dkc;
-	}
-
-	bp->b_edev = SD_GET_DEV(un);
-	bp->b_dev = cmpdev(bp->b_edev);	/* maybe unnecessary? */
-
-	(void) sd_uscsi_strategy(bp);
-
-	/*
-	 * If synchronous request, wait for completion
-	 * If async just return and let b_iodone callback
-	 * cleanup.
-	 * NOTE: On return, u_ncmds_in_driver will be decremented,
-	 * but it was also incremented in sd_uscsi_strategy(), so
-	 * we should be ok.
-	 */
-	if (is_async == FALSE) {
-		(void) biowait(bp);
-		rval = sd_send_scsi_UNMAP_biodone(bp);
-	}
-
-	return (rval);
+	return (status);
 }
 
 static int
 sd_send_scsi_UNMAP_biodone(struct buf *bp)
 {
-	struct sd_uscsi_info *uip;
-	struct uscsi_cmd *uscmd;
-	uint8_t *sense_buf;
-	struct sd_lun *un;
-	int status;
+	struct sd_uscsi_info	*uip;
+	struct uscsi_cmd	*uscmd;
+	uint8_t			*sense_buf;
+	struct sd_lun		*un;
+	int			status;
+	unmap_async_task_info_t	*uati;
 
-	uip = (struct sd_uscsi_info *)(bp->b_private);
+	uip = bp->b_private;
 	ASSERT(uip != NULL);
+	uati = uip->ui_dkc.dkc_cookie;
+	ASSERT(uati != NULL);
 
 	uscmd = uip->ui_cmdp;
 	ASSERT(uscmd != NULL);
@@ -21621,21 +21507,274 @@ sd_send_scsi_UNMAP_biodone(struct buf *bp)
 	}
 
 done:
-	if (uip->ui_dkc.dkc_callback != NULL) {
-		(*uip->ui_dkc.dkc_callback)(uip->ui_dkc.dkc_cookie, status);
-	}
-
 	ASSERT((bp->b_flags & B_REMAPPED) == 0);
 	freerbuf(bp);
 	kmem_free(uip, sizeof (struct sd_uscsi_info));
 	kmem_free(uscmd->uscsi_rqbuf, SENSE_LENGTH);
 	kmem_free(uscmd->uscsi_cdb, (size_t)uscmd->uscsi_cdblen);
-	kmem_free(uscmd->uscsi_bufaddr, uscmd->uscsi_buflen);
+	kmem_free(uscmd->uscsi_bufaddr, sizeof (unmap_param_hdr_t) +
+	    UNMAP_MAX_EXTENTS * sizeof (unmap_blk_descr_t));
 	kmem_free(uscmd, sizeof (struct uscsi_cmd));
+
+	mutex_enter(&uati->uati_mtx);
+	uati->uati_ncmds_executing--;
+	if (status != 0)
+		uati->uati_status = status;
+	if (uati->uati_is_async) {
+		/*
+		 * If we're executing async, last command that completes
+		 * should clean up.
+		 */
+		mutex_exit(&uati->uati_mtx);
+		if (uati->uati_ncmds_executing == 0)
+			(void) sd_send_scsi_UNMAP_taskdone(uati);
+	} else {
+		/*
+		 * If we're executing sync, the thread waiting in
+		 * sd_send_scsi_UNMAP which will do the clean up, so
+		 * just signal it.
+		 */
+		mutex_exit(&uati->uati_mtx);
+		if (uati->uati_ncmds_executing == 0)
+			cv_signal(&uati->uati_cv);
+	}
 
 	return (status);
 }
 
+static void
+sd_send_scsi_UNMAP_issue_one(struct sd_lun *un, unmap_async_task_info_t *uati,
+    unmap_param_hdr_t *uph, int num_exts)
+{
+	struct sd_uscsi_info		*uip = NULL;
+	struct uscsi_cmd		*uscmd = NULL;
+	union scsi_cdb			*cdb = NULL;
+	struct buf			*bp = NULL;
+	const uint64_t			param_size =
+	    sizeof (unmap_param_hdr_t) + num_exts * sizeof (unmap_blk_descr_t);
+
+	uph->uph_data_len = param_size - 1;
+	uph->uph_descr_data_len = param_size - 7;
+
+	cdb = kmem_zalloc(CDB_GROUP1, KM_SLEEP);
+	cdb->scc_cmd = SCMD_UNMAP;
+
+	/*
+	 * First get some memory for the uscsi_cmd struct and cdb
+	 * and initialize for UNMAP cmd.
+	 */
+	uscmd = kmem_zalloc(sizeof (*uscmd), KM_SLEEP);
+	uscmd->uscsi_cdblen = CDB_GROUP1;
+	uscmd->uscsi_cdb = (caddr_t)cdb;
+	uscmd->uscsi_bufaddr = (caddr_t)uph;
+	uscmd->uscsi_buflen = param_size;
+
+	uscmd->uscsi_rqbuf = kmem_zalloc(SENSE_LENGTH, KM_SLEEP);
+	uscmd->uscsi_rqlen = SENSE_LENGTH;
+	uscmd->uscsi_rqresid = SENSE_LENGTH;
+	uscmd->uscsi_flags = USCSI_RQENABLE | USCSI_SILENT | USCSI_WRITE;
+	uscmd->uscsi_timeout = sd_io_time;
+
+	/*
+	 * Allocate an sd_uscsi_info struct and fill it with the info
+	 * needed by sd_initpkt_for_uscsi().  Then put the pointer into
+	 * b_private in the buf for sd_initpkt_for_uscsi().  Note that
+	 * since we allocate the buf here in this function, we do not
+	 * need to preserve the prior contents of b_private.
+	 * The sd_uscsi_info struct is also used by sd_uscsi_strategy()
+	 */
+	uip = kmem_zalloc(sizeof (*uip), KM_SLEEP);
+	uip->ui_flags = SD_PATH_DIRECT;
+	uip->ui_cmdp  = uscmd;
+	uip->ui_dkc.dkc_cookie = uati;	/* for sd_send_scsi_UNMAP_biodone */
+
+	ASSERT(MUTEX_HELD(&uati->uati_mtx));
+	uati->uati_ncmds_executing++;
+
+	bp = getrbuf(KM_SLEEP);
+	bp->b_private = uip;
+
+	/*
+	 * Setup buffer to carry uscsi request.
+	 */
+	bp->b_flags  = B_BUSY;
+	bp->b_bcount = 0;
+	bp->b_blkno  = 0;
+
+	bp->b_iodone = sd_send_scsi_UNMAP_biodone;
+	bp->b_edev = SD_GET_DEV(un);
+	bp->b_dev = cmpdev(bp->b_edev);	/* maybe unnecessary? */
+
+	(void) sd_uscsi_strategy(bp);
+}
+
+static void
+sd_send_scsi_UNMAP_issue(struct sd_lun *un, const dkioc_free_list_t *dfl,
+    unmap_async_task_info_t *uati)
+{
+	unmap_param_hdr_t	*uph;
+	size_t			num_exts = 0;
+
+	ASSERT(MUTEX_HELD(&uati->uati_mtx));
+
+	/*
+	 * UNMAP has a limit on the number of extents, so we may need to
+	 * issue multiple commands in order to consume the entire list.
+	 */
+	for (size_t i = 0; i < dfl->dfl_num_exts; i++) {
+		dkioc_free_list_ext_t *ext = &dfl->dfl_exts[i];
+		uint64_t ext_start = ext->dfle_start;
+		uint64_t ext_length = ext->dfle_length;
+
+		/*
+		 * UNMAP also has a maximum extent length that can be
+		 * expressed, so we may need to split the extent.
+		 */
+		while (ext_length > 0) {
+			unmap_blk_descr_t *ubd;
+			uint64_t len = MIN(ext_length, UNMAP_MAX_EXT_LEN);
+
+			if (uph == NULL) {
+				uph = kmem_zalloc(sizeof (unmap_param_hdr_t) +
+				    UNMAP_MAX_EXTENTS *
+				    sizeof (unmap_blk_descr_t), KM_SLEEP);
+			}
+
+			ubd = (unmap_blk_descr_t *)(uph +
+			    sizeof (*uph) + (sizeof (*ubd) * num_exts));
+			ubd->ubd_lba = ext_start;
+			ubd->ubd_num_blks = len / DEV_BSIZE;
+			num_exts++;
+
+			if (num_exts > UNMAP_MAX_EXTENTS) {
+				sd_send_scsi_UNMAP_issue_one(un, uati, uph,
+				    num_exts);
+				uph = NULL;
+				num_exts = 0;
+			}
+
+			ext_start += len;
+			ext_length -= len;
+		}
+	}
+
+	if (uph != NULL) {
+		/* issue last command */
+		ASSERT(num_exts != 0);
+		sd_send_scsi_UNMAP_issue_one(un, uati, uph, num_exts);
+	}
+}
+
+/*
+ * Constructs and sends SCSI UNMAP commands from the list of extents to
+ * be freed. The caller is responsible for freeing the passed extent list
+ * (for calls from userspace, a local copy is automatically created and
+ * destroyed).
+ * Please note that due to limitations in the UNMAP command syntax as well
+ * as device-specific limitations, this function can and will if necessary
+ * issue multiple UNMAP commands to consume the entire list of extents.
+ * This is done by issuing all commands asynchronously and then, depending
+ * on whether `dkc' was provided or not, waiting for them to complete in
+ * this function, or calling `dkc' from an async thread of the last command
+ * to complete.
+ * The way this is implemented is by allocating two types of structures:
+ *	1) An unmap_async_task_info_t - this holds the info about the
+ *	overall free list processing (i.e. how many commands have been
+ *	issued and what to do when this finishes). Here `task' refers to
+ *	a single invocation of sd_send_scsi_UNMAP. It does not refer to
+ *	a thread or task in the classical sense - it's simply a grouping of
+ *	individual UNMAP commands that have been issued to satisfy one
+ *	dkioc_free_list_t (i.e. one call of sd_send_scsi_UNMAP).
+ *	2) An unmap_async_cmd_info_t - this holds the info about one UNMAP
+ *	command and links to the shared unmap_async_task_info_t.
+ * When an UNMAP command completes and the sd command handling calls the
+ * sd_send_scsi_UNMAP_biodone callback, the command lifts its
+ * unmap_async_cmd_info_t from the b_private field in the "struct buf bp"
+ * callback argument. The cmd_info_t contains a pointer to the
+ * unmap_async_task_info_t which holds the number of UNMAP commands
+ * currently being executed for this unmap task. Upon completion of the
+ * command, the biodone callback decrements this counter and if the counter
+ * has reached zero (i.e. all commands issued as part of this unmap task
+ * are complete), it checks whether the task is sync or async. If the
+ * task is sync, then the callback simply signals uati_cv to inform the
+ * thread blocked in sd_send_scsi_UNMAP that all commands have completed
+ * and task cleanup can be done. If the task is async, then no thread is
+ * waiting on the counter, hence the biodone callback itself will call
+ * sd_send_scsi_UNMAP_taskdone to clean up the task and call any async
+ * callbacks.
+ * Error handling is problematic using the existing interface, as the
+ * native sd interface assumes only a single command will be issued and
+ * hence only a single failure can be delivered up the stack. To allow for
+ * some form of error detection, we store the error code of the last
+ * command that failed in uati_status. If some UNMAP commands succeeded
+ * and some failed, we store the error code of the last one to fail.
+ */
+static int
+sd_send_scsi_UNMAP(struct sd_lun *un, dkioc_free_list_t *dfl,
+    struct dk_callback *dkc, int flag)
+{
+	int			rval = 0;
+	boolean_t		is_async;
+	unmap_async_task_info_t	*uati;
+
+	ASSERT(un != NULL);
+	ASSERT(!mutex_owned(SD_MUTEX(un)));
+	ASSERT(dfl != NULL);
+
+	if (dkc == NULL || dkc->dkc_callback == NULL)
+		is_async = FALSE;
+	else
+		is_async = TRUE;
+
+	/* For userspace calls we must copy in. */
+	if (!(flag & FKIOCTL) && (dfl = dfl_copyin(dfl, flag, KM_SLEEP)) ==
+	    NULL)
+		return (SET_ERROR(EFAULT));
+
+	/* Zero extents is not a valid request */
+	if (dfl->dfl_num_exts == 0) {
+		if (!(flag & FKIOCTL))
+			dfl_copyin_destroy(dfl);
+		return (SET_ERROR(EINVAL));
+	}
+
+	uati = kmem_zalloc(sizeof (*uati), KM_SLEEP);
+	mutex_init(&uati->uati_mtx, NULL, MUTEX_DEFAULT, NULL);
+	cv_init(&uati->uati_cv, NULL, CV_DEFAULT, NULL);
+	uati->uati_is_async = is_async;
+	if (is_async)
+		uati->uati_dkc = *dkc;
+
+	/*
+	 * This lock must be held while issuing UNMAPs to guarantee
+	 * that we don't hit uati_ncmds_executing=0 (which could cause
+	 * the biodone handlers of the individual commands calling the
+	 * "done" callback in the uati structure) due to commands
+	 * completing before we're done punching them all out.
+	 */
+	mutex_enter(&uati->uati_mtx);
+	sd_send_scsi_UNMAP_issue(un, dfl, uati);
+	mutex_exit(&uati->uati_mtx);
+
+	if (!(flag & FKIOCTL)) {
+		dfl_copyin_destroy(dfl);
+		dfl = NULL;
+	}
+
+	if (!is_async) {
+		/*
+		 * In sync mode, we wait until the number of commands executing
+		 * has reached zero and then perform task cleanup & callback.
+		 */
+		mutex_enter(&uati->uati_mtx);
+		while (uati->uati_ncmds_executing > 0)
+			cv_wait(&uati->uati_cv, &uati->uati_mtx);
+		mutex_exit(&uati->uati_mtx);
+		rval = sd_send_scsi_UNMAP_taskdone(uati);
+	}
+
+	return (rval);
+}
 
 /*
  *    Function: sd_send_scsi_GET_CONFIGURATION

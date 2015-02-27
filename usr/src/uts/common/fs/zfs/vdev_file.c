@@ -217,8 +217,8 @@ vdev_file_io_start(zio_t *zio)
 
 				bzero(&flck, sizeof (flck));
 				flck.l_type = F_FREESP;
-				flck.l_start = dfl->dfl_exts[i].ext_start;
-				flck.l_len = dfl->dfl_exts[i].ext_length;
+				flck.l_start = dfl->dfl_exts[i].dfle_start;
+				flck.l_len = dfl->dfl_exts[i].dfle_length;
 
 				error = VOP_SPACE(vf->vf_vnode,
 				    F_FREESP, &flck, 0, 0, kcred, NULL);

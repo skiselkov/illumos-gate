@@ -22,7 +22,7 @@
 /*
  * Copyright (c) 1982, 2010, Oracle and/or its affiliates. All rights reserved.
  *
- * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2012 DEY Storage Systems, Inc.  All rights reserved.
  */
 
@@ -524,22 +524,20 @@ typedef struct dk_updatefw_32 {
 
 /*
  * ioctl to free space (e.g. SCSI UNMAP) off a disk.
- * Pass a dkioc_free_t containing a list of dkioc_free_extent_t's.
+ * Pass a dkioc_free_list_t containing a list of extentns to be freed.
  */
 #define	DKIOCFREE	(DKIOC|50)
 
 #define	DF_WAIT_SYNC	0x00000001	/* Wait for full write-out of free. */
+typedef struct dkioc_free_list_ext_s {
+	diskaddr_t		dfle_start;
+	diskaddr_t		dfle_length;
+} dkioc_free_list_ext_t;
 
-#define	DFL_MAX_EXTENTS	(UINT16_MAX / 16)  /* Max number of extents in list */
-#define	DFL_MAX_EXT_LEN	(UINT32_MAX * DEV_BSIZE)	/* Max extent length */
 typedef struct dkioc_free_list_s {
-	uint32_t		dfl_flags;
-	uint16_t		dfl_num_exts;
-	uint16_t		dfl_reserved;		/* for alignment */
-	struct {
-		diskaddr_t ext_start;
-		diskaddr_t ext_length;
-	} dfl_exts[DFL_MAX_EXTENTS];
+	uint64_t		dfl_flags;
+	size_t			dfl_num_exts;
+	dkioc_free_list_ext_t	*dfl_exts;
 } dkioc_free_list_t;
 
 #ifdef	__cplusplus

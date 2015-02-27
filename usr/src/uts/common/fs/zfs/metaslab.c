@@ -182,11 +182,21 @@ static uint64_t metaslab_fragmentation(metaslab_t *);
 
 /*
  * How many TXG's worth of updates should be aggregated per TRIM/UNMAP
- * issued to the underlying vdev. This serves to fulfill two functions:
- * aggregate many small frees into fewer larger ones (which should help
- * with devices which do not take so kindly to them) and to allow for
- * disaster recovery (extents won't get trimmed immediately, but
- * instead only after passing this fixed timeout).
+ * issued to the underlying vdev. We keep two range trees of extents
+ * (called "trim sets") to be trimmed per metaslab, the `current' and
+ * the `previous' TS. New free's are added to the current TS. Then,
+ * once `zfs_txgs_per_trim' transactions have elapsed, the `current'
+ * TS becomes the `previous' TS and a new, blank TS is created to be
+ * the new `current', which will then start accumulating any new frees.
+ * Once another zfs_txgs_per_trim TXGs have passed, the previous TS's
+ * extents are trimmed, the TS is destroyed and the current TS again
+ * becomes the previous TS.
+ * This serves to fulfill two functions: aggregate many small frees
+ * into fewer larger trim operations (which should help with devices
+ * which do not take so kindly to them) and to allow for disaster
+ * recovery (extents won't get trimmed immediately, but instead only
+ * after passing this rather long timeout, thus not preserving
+ * 'zfs import -F' functionality).
  */
 unsigned int zfs_txgs_per_trim = 32;
 
@@ -2685,14 +2695,11 @@ metaslab_trim(metaslab_t *msp, uint64_t txg)
 	if (txg > msp->ms_cur_ts->ts_birth &&
 	    txg - msp->ms_cur_ts->ts_birth >= zfs_txgs_per_trim) {
 		if (msp->ms_prev_ts != NULL) {
-			if (range_tree_space(msp->ms_prev_ts->ts_tree) > 0) {
-				/*
-				 * Trim out aged extents on the vdevs - these
-				 * are safe to be removed now.
-				 */
-				metaslab_exec_trim(msp,
-				    msp->ms_prev_ts->ts_tree);
-			}
+			/*
+			 * Trim out aged extents on the vdevs - these are safe
+			 * to be removed now.
+			 */
+			metaslab_exec_trim(msp, msp->ms_prev_ts->ts_tree);
 			metaslab_free_trimset(msp->ms_prev_ts);
 		}
 		msp->ms_prev_ts = msp->ms_cur_ts;

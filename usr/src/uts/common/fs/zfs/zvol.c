@@ -1773,22 +1773,27 @@ zvol_ioctl(dev_t dev, int cmd, intptr_t arg, int flag, cred_t *cr, int *rvalp)
 
 	case DKIOCFREE:
 	{
-		dkioc_free_list_t *dfl = dfl_new(KM_SLEEP, 0);
+		dkioc_free_list_t *dfl;
 		dmu_tx_t *tx;
+
+		mutex_exit(&zfsdev_state_lock);
 
 		if (!zvol_unmap_enabled)
 			break;
 
-		if (ddi_copyin((void *)arg, dfl, sizeof (*dfl), flag)) {
-			error = SET_ERROR(EFAULT);
-			break;
+		if (!(flag & FKIOCTL)) {
+			dfl = dfl_copyin((void *)arg, flag, KM_SLEEP);
+			if (dfl == NULL) {
+				error = SET_ERROR(EFAULT);
+				break;
+			}
+		} else {
+			dfl = (dkioc_free_list_t *)arg;
 		}
 
-		mutex_exit(&zfsdev_state_lock);
-
 		for (int i = 0; i < dfl->dfl_num_exts; i++) {
-			uint64_t start = dfl->dfl_exts[i].ext_start,
-			    length = dfl->dfl_exts[i].ext_length,
+			uint64_t start = dfl->dfl_exts[i].dfle_start,
+			    length = dfl->dfl_exts[i].dfle_length,
 			    end = start + length;
 
 			/*
@@ -1843,7 +1848,10 @@ zvol_ioctl(dev_t dev, int cmd, intptr_t arg, int flag, cred_t *cr, int *rvalp)
 				    0);
 			}
 		}
-		dfl_destroy(dfl);
+
+		if (!(flag & FKIOCTL))
+			dfl_copyin_destroy(dfl);
+
 		return (error);
 	}
 
