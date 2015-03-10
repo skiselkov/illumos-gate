@@ -214,6 +214,22 @@ struct sd_mapblocksize_info {
 
 _NOTE(SCHEME_PROTECTS_DATA("unshared data", sd_mapblocksize_info))
 
+/* Thin-provisioning (UNMAP) flags for un_thin_flags. */
+enum {
+	SD_THIN_PROV_ENABLED =		1 << 0,	/* UNMAP available */
+	SD_THIN_PROV_READ_ZEROS =	1 << 1	/* read unmapped blk = zeros */
+};
+
+typedef struct sd_blk_limits_s {
+	uint16_t	lim_opt_xfer_len_gran;
+	uint32_t	lim_max_xfer_len;
+	uint32_t	lim_opt_xfer_len;
+	uint32_t	lim_max_pfetch_xdrd_xdwr_xfer_len;
+	uint32_t	lim_max_unmap_lba_cnt;
+	uint32_t	lim_max_unmap_blk_descr_cnt;
+	uint32_t	lim_opt_unmap_gran;
+	uint32_t	lim_unmap_gran_align;
+} sd_blk_limits_t;
 
 /*
  * sd_lun: The main data structure for a scsi logical unit.
@@ -505,6 +521,12 @@ struct sd_lun {
 	struct sd_w_map	*un_wm;		/* head of sd_w_map chain */
 	uint64_t	un_rmw_incre_count;	/* count I/O */
 	timeout_id_t	un_rmw_msg_timeid;	/* for RMW message control */
+
+	/* Thin provisioning support (see SD_THIN_PROV_*) */
+	uint64_t	un_thin_flags;
+
+	/* Block limits (0xB0 VPD page) */
+	sd_blk_limits_t	un_blk_lim;
 
 	/* For timeout callback to issue a START STOP UNIT command */
 	timeout_id_t	un_startstop_timeid;
@@ -2379,7 +2401,8 @@ typedef struct disk_power_attr_pc {
 #define	SD_VPD_ASCII_OP_PG	0x08	/* 0x82 - ASCII Op Defs */
 #define	SD_VPD_DEVID_WWN_PG	0x10	/* 0x83 - Device Identification */
 #define	SD_VPD_EXTENDED_DATA_PG	0x80	/* 0x86 - Extended data about the lun */
-#define	SD_VPD_DEV_CHARACTER_PG	0x400	/* 0xB1 - Device Characteristics */
+#define	SD_VPD_BLK_LIMITS_PG	0x400	/* 0xB0 - Block Limits */
+#define	SD_VPD_DEV_CHARACTER_PG	0x800	/* 0xB1 - Device Characteristics */
 
 /*
  * Non-volatile cache support
