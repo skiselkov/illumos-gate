@@ -943,6 +943,7 @@ zio_trim(struct range_tree *tree, spa_t *spa, vdev_t *vd, zio_done_func_t *done,
 		return (pio);
 
 	dfl = kmem_zalloc(sizeof (*dfl), KM_SLEEP);
+	dfl->dfl_flags = trim_flags;
 	dfl->dfl_num_exts = avl_numnodes(&tree->rt_root);
 	dfl->dfl_exts = kmem_zalloc(sizeof (*dfl->dfl_exts) * dfl->dfl_num_exts,
 	    KM_SLEEP);

@@ -2468,16 +2468,20 @@ sbd_handle_write_same(scsi_task_t *task, struct stmf_data_buf *initial_dbuf)
 
 	/* Check if the command is for the unmap function */
 	if (unmap) {
-		dkioc_free_list_t *dfl = dfl_new(KM_SLEEP, 0);
+		dkioc_free_list_t *dfl = kmem_zalloc(sizeof (*dfl), KM_SLEEP);
 
-		dfl_append(dfl, addr, len);
-		if (sbd_unmap(dfl, sl) != 0) {
+		dfl->dfl_exts = kmem_zalloc(sizeof (*dfl->dfl_exts), KM_SLEEP);
+		dfl->dfl_num_exts = 1;
+		dfl->dfl_exts[0].dfle_start = addr;
+		dfl->dfl_exts[0].dfle_length = len;
+		if (sbd_unmap(sl, dfl) != 0) {
 			stmf_scsilib_send_status(task, STATUS_CHECK,
 			    STMF_SAA_LBA_OUT_OF_RANGE);
 		} else {
 			stmf_scsilib_send_status(task, STATUS_GOOD, 0);
 		}
-		dfl_destroy(dfl);
+		kmem_free(dfl->dfl_exts, sizeof (*dfl->dfl_exts));
+		kmem_free(dfl, sizeof (*dfl));
 		return;
 	}
 
@@ -2583,6 +2587,7 @@ sbd_handle_unmap_xfer(scsi_task_t *task, uint8_t *buf, uint32_t buflen)
 	uint8_t *p;
 	dkioc_free_list_t *dfl;
 	int ret;
+	int i;
 
 	if (buflen < 24) {
 		stmf_scsilib_send_status(task, STATUS_CHECK,
@@ -2599,31 +2604,26 @@ sbd_handle_unmap_xfer(scsi_task_t *task, uint8_t *buf, uint32_t buflen)
 		return;
 	}
 
-	if (num_desc > DFL_MAX_EXTENTS) {
-		stmf_scsilib_send_status(task, STATUS_CHECK,
-		    STMF_SAA_INVALID_FIELD_IN_CDB);
-		return;
-	}
-
-	dfl = dfl_new(KM_SLEEP, 0);
-	for (p = buf + 8; num_desc; num_desc--, p += 16) {
+	dfl = kmem_zalloc(sizeof (*dfl), KM_SLEEP);
+	dfl->dfl_exts = kmem_zalloc(sizeof (*dfl->dfl_exts) * num_desc,
+	    KM_SLEEP);
+	dfl->dfl_num_exts = num_desc;
+	for (p = buf + 8, i = 0; num_desc; num_desc--, p += 16, i++) {
 		addr = READ_SCSI64(p, uint64_t);
 		addr <<= sl->sl_data_blocksize_shift;
 		len = READ_SCSI32(p+8, uint64_t);
 		len <<= sl->sl_data_blocksize_shift;
-		if (len > DFL_MAX_EXT_LEN) {
-			stmf_scsilib_send_status(task, STATUS_CHECK,
-			    STMF_SAA_INVALID_FIELD_IN_CDB);
-			dfl_destroy(dfl);
-			return;
-		}
+
 		/* Prepare a list of extents to unmap */
-		dfl_append(dfl, addr, len);
+		dfl->dfl_exts[i].dfle_start = addr;
+		dfl->dfl_exts[i].dfle_length = len;
 	}
+	ASSERT(i == dfl->dfl_num_exts);
 
 	/* Finally execute the unmap operations in a single step */
 	ret = sbd_unmap(sl, dfl);
-	dfl_destroy(dfl);
+	kmem_free(dfl->dfl_exts, sizeof (*dfl->dfl_exts) * dfl->dfl_num_exts);
+	kmem_free(dfl, sizeof (*dfl));
 	if (ret != 0) {
 		stmf_scsilib_send_status(task, STATUS_CHECK,
 		    STMF_SAA_LBA_OUT_OF_RANGE);

@@ -3713,7 +3713,7 @@ sbd_unmap(sbd_lu_t *sl, dkioc_free_list_t *dfl)
 		return (EIO);
 	}
 
-	ret = VOP_IOCTL(vp, DKIOCFREE, (intptr_t)(&dfl), FKIOCTL, kcred,
+	ret = VOP_IOCTL(vp, DKIOCFREE, (intptr_t)dfl, FKIOCTL, kcred,
 	    &unused, NULL);
 
 	return (ret);

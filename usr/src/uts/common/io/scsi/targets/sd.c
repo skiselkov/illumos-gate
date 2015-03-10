@@ -5333,63 +5333,51 @@ sd_update_block_info(struct sd_lun *un, uint32_t lbasize, uint64_t capacity)
 }
 
 /*
- * Sets the SCSI block limits to a default value for limits contained
- * in the VPD block limits page up to page length = 0x10.
+ * Parses the SCSI Block Limits VPD page (0xB0). It's legal to pass NULL for
+ * vpd_pg, in which case all the block limits will be reset to the defaults.
  */
-static inline void
-sd_blk_lim_set_dfl_xfer(sd_blk_limits_t *lim)
-{
-		lim->lim_opt_xfer_len_gran = 0;
-		lim->lim_max_xfer_len = UINT32_MAX;
-		lim->lim_opt_xfer_len = UINT32_MAX;
-}
-
-/*
- * Sets the SCSI block limits to a default value for limits contained
- * in the VPD block limits page up to page length = 0x3c.
- */
-static inline void
-sd_blk_lim_set_dfl_pfetch_unmap(sd_blk_limits_t *lim)
-{
-		lim->lim_max_pfetch_xdrd_xdwr_xfer_len = UINT32_MAX;
-		lim->lim_max_unmap_lba_cnt = UINT32_MAX;
-		lim->lim_max_unmap_blk_descr_cnt = SD_UNMAP_MAX_EXTENTS;
-		lim->lim_opt_unmap_gran = 0;
-		lim->lim_unmap_gran_align = 0;
-}
-
-/* Parses the SCSI Block Limits VPD page (0xB0). */
 static void
 sd_parse_blk_limits_vpd(struct sd_lun *un, uchar_t *vpd_pg)
 {
 	sd_blk_limits_t *lim = &un->un_blk_lim;
-	uint8_t pg_len = vpd_pg[3];
+	unsigned pg_len;
 
-	bzero(lim, sizeof (*lim));
+	if (vpd_pg != NULL)
+		pg_len = BE_IN16(&vpd_pg[2]);
+	else
+		pg_len = 0;
 
-	if (pg_len >= 0x10) {
+	/* Block Limits VPD can be 16 bytes or 64 bytes long - support both */
+	if (pg_len >= 10) {
 		lim->lim_opt_xfer_len_gran = BE_IN16(&vpd_pg[6]);
 		lim->lim_max_xfer_len = BE_IN32(&vpd_pg[8]);
 		lim->lim_opt_xfer_len = BE_IN32(&vpd_pg[12]);
 	} else {
-		sd_blk_lim_set_dfl_xfer(lim);
+		lim->lim_opt_xfer_len_gran = 0;
+		lim->lim_max_xfer_len = UINT32_MAX;
+		lim->lim_opt_xfer_len = UINT32_MAX;
 	}
 	if (pg_len >= 0x3c) {
-		lim->lim_max_pfetch_xdrd_xdwr_xfer_len = BE_IN32(&vpd_pg[16]);
+		lim->lim_max_pfetch_len = BE_IN32(&vpd_pg[16]);
 		lim->lim_max_unmap_lba_cnt = BE_IN32(&vpd_pg[20]);
-		lim->lim_max_unmap_blk_descr_cnt = BE_IN32(&vpd_pg[24]);
+		lim->lim_max_unmap_descr_cnt = BE_IN32(&vpd_pg[24]);
 		lim->lim_opt_unmap_gran = BE_IN32(&vpd_pg[28]);
-		if ((vpd_pg[28] >> 7) == 1) {
+		if ((vpd_pg[32] >> 7) == 1) {
 			/* left-most bit on each byte is a flag */
 			lim->lim_unmap_gran_align =
-			    ((vpd_pg[28] & 0x7f) << 21) |
-			    ((vpd_pg[29] & 0x7f) << 14) |
-			    ((vpd_pg[30] & 0x7f) << 7) | (vpd_pg[31] & 0x7f);
+			    ((vpd_pg[32] & 0x7f) << 24) | (vpd_pg[33] << 16) |
+			    (vpd_pg[34] << 8) | vpd_pg[35];
 		} else {
 			lim->lim_unmap_gran_align = 0;
 		}
+		lim->lim_max_write_same_len = BE_IN64(&vpd_pg[36]);
 	} else {
-		sd_blk_lim_set_dfl_pfetch_unmap(lim);
+		lim->lim_max_pfetch_len = UINT32_MAX;
+		lim->lim_max_unmap_lba_cnt = UINT32_MAX;
+		lim->lim_max_unmap_descr_cnt = SD_UNMAP_MAX_EXTENTS;
+		lim->lim_opt_unmap_gran = 0;
+		lim->lim_unmap_gran_align = 0;
+		lim->lim_max_write_same_len = UINT64_MAX;
 	}
 }
 
@@ -5609,12 +5597,8 @@ sd_register_devid(sd_ssc_t *ssc, dev_info_t *devi, int reservation_flag)
 		}
 	}
 
-	if (inqB0 != NULL) {
-		sd_parse_blk_limits_vpd(ssc->ssc_un, inqB0);
-	} else {
-		sd_blk_lim_set_dfl_xfer(&ssc->ssc_un->un_blk_lim);
-		sd_blk_lim_set_dfl_pfetch_unmap(&ssc->ssc_un->un_blk_lim);
-	}
+	/* passing NULL inqB0 will reset to defaults */
+	sd_parse_blk_limits_vpd(ssc->ssc_un, inqB0);
 
 cleanup:
 	/* clean up resources */
@@ -21681,22 +21665,21 @@ sd_send_scsi_UNMAP_issue_one(struct sd_lun *un, unmap_async_task_info_t *uati,
 	 * The sd_uscsi_info struct is also used by sd_uscsi_strategy()
 	 */
 	uip = kmem_zalloc(sizeof (*uip), KM_SLEEP);
-	uip->ui_flags = SD_PATH_DIRECT;
+	uip->ui_flags = SD_PATH_STANDARD;
 	uip->ui_cmdp  = uscmd;
 	uip->ui_dkc.dkc_cookie = uati;	/* for sd_send_scsi_UNMAP_biodone */
 
 	ASSERT(MUTEX_HELD(&uati->uati_mtx));
 	uati->uati_ncmds_executing++;
 
-	bp = getrbuf(KM_SLEEP);
-	bp->b_private = uip;
 
 	/*
 	 * Setup buffer to carry uscsi request.
 	 */
-	bp->b_flags  = B_BUSY;
+	bp = getrbuf(KM_SLEEP);
+	bp->b_private = uip;
 	bp->b_bcount = 0;
-	bp->b_blkno  = 0;
+	bp->b_blkno = 0;
 
 	bp->b_iodone = sd_send_scsi_UNMAP_biodone;
 	bp->b_edev = SD_GET_DEV(un);
@@ -21709,10 +21692,12 @@ static void
 sd_send_scsi_UNMAP_issue(struct sd_lun *un, const dkioc_free_list_t *dfl,
     unmap_async_task_info_t *uati)
 {
-	unmap_param_hdr_t	*uph;
+	unmap_param_hdr_t	*uph = NULL;
 	size_t			num_exts = 0;
 
 	ASSERT(MUTEX_HELD(&uati->uati_mtx));
+	VERIFY(SD_TGTBLOCKS2BYTES(un, un->un_blk_lim.lim_max_unmap_lba_cnt)
+	    != 0);
 
 	/*
 	 * UNMAP has a limit on the number of extents, so we may need to
@@ -21729,7 +21714,8 @@ sd_send_scsi_UNMAP_issue(struct sd_lun *un, const dkioc_free_list_t *dfl,
 		 */
 		while (ext_length > 0) {
 			unmap_blk_descr_t *ubd;
-			uint64_t len = MIN(ext_length, SD_UNMAP_MAX_EXT_LEN);
+			uint64_t len = MIN(ext_length, SD_TGTBLOCKS2BYTES(un,
+			    un->un_blk_lim.lim_max_unmap_lba_cnt));
 
 			if (uph == NULL) {
 				uph = kmem_zalloc(sizeof (unmap_param_hdr_t) +

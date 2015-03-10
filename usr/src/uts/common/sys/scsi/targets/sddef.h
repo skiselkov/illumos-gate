@@ -217,18 +217,23 @@ _NOTE(SCHEME_PROTECTS_DATA("unshared data", sd_mapblocksize_info))
 /* Thin-provisioning (UNMAP) flags for un_thin_flags. */
 enum {
 	SD_THIN_PROV_ENABLED =		1 << 0,	/* UNMAP available */
-	SD_THIN_PROV_READ_ZEROS =	1 << 1	/* read unmapped blk = zeros */
+	SD_THIN_PROV_READ_ZEROS =	1 << 1	/* unmapped blk = zeros */
 };
 
+/*
+ * Device limits as read from the Block Limits VPD page (0xB0). If the page
+ * is unavailable, will be filled with some defaults.
+ */
 typedef struct sd_blk_limits_s {
 	uint16_t	lim_opt_xfer_len_gran;
 	uint32_t	lim_max_xfer_len;
 	uint32_t	lim_opt_xfer_len;
-	uint32_t	lim_max_pfetch_xdrd_xdwr_xfer_len;
+	uint32_t	lim_max_pfetch_len;
 	uint32_t	lim_max_unmap_lba_cnt;
-	uint32_t	lim_max_unmap_blk_descr_cnt;
+	uint32_t	lim_max_unmap_descr_cnt;
 	uint32_t	lim_opt_unmap_gran;
 	uint32_t	lim_unmap_gran_align;
+	uint64_t	lim_max_write_same_len;
 } sd_blk_limits_t;
 
 /*

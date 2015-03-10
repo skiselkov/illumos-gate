@@ -16,11 +16,14 @@
 #ifndef _SYS_DKIOC_FREE_UTIL_H
 #define	_SYS_DKIOC_FREE_UTIL_H
 
+#include <sys/sunddi.h>
 #include <sys/dkio.h>
 
 #ifdef	__cplusplus
 extern "C" {
 #endif
+
+#ifdef	_KERNEL
 
 static inline dkioc_free_list_t *
 dfl_copyin(void *arg, int ddi_flags, int kmflags)
@@ -48,6 +51,17 @@ dfl_copyin(void *arg, int ddi_flags, int kmflags)
 
 	return (dfl);
 }
+
+#else	/* !_KERNEL */
+
+/*ARGSUSED*/
+static inline dkioc_free_list_t *
+dfl_copyin(void *arg, int ddi_flags, int kmflags)
+{
+	return (arg);
+}
+
+#endif	/* !_KERNEL */
 
 static inline void
 dfl_copyin_destroy(dkioc_free_list_t *dfl)
