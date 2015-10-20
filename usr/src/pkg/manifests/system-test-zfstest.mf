@@ -12,7 +12,7 @@
 #
 # Copyright (c) 2012, 2016 by Delphix. All rights reserved.
 # Copyright 2016, OmniTI Computer Consulting, Inc. All rights reserved.
-# Copyright 2016 Nexenta Systems, Inc.
+# Copyright 2017 Nexenta Systems, Inc.
 #
 
 set name=pkg.fmri value=pkg:/system/test/zfstest@$(PKGVERS)
@@ -134,6 +134,7 @@ dir path=opt/zfs-tests/tests/functional/snapshot
 dir path=opt/zfs-tests/tests/functional/snapused
 dir path=opt/zfs-tests/tests/functional/sparse
 dir path=opt/zfs-tests/tests/functional/threadsappend
+dir path=opt/zfs-tests/tests/functional/trim
 dir path=opt/zfs-tests/tests/functional/truncate
 dir path=opt/zfs-tests/tests/functional/userquota
 dir path=opt/zfs-tests/tests/functional/utils_test
@@ -2164,6 +2165,12 @@ file path=opt/zfs-tests/tests/functional/threadsappend/setup mode=0555
 file path=opt/zfs-tests/tests/functional/threadsappend/threadsappend mode=0555
 file path=opt/zfs-tests/tests/functional/threadsappend/threadsappend_001_pos \
     mode=0555
+file path=opt/zfs-tests/tests/functional/trim/autotrim_001_pos mode=0555
+file path=opt/zfs-tests/tests/functional/trim/cleanup mode=0555
+file path=opt/zfs-tests/tests/functional/trim/manualtrim_001_pos mode=0555
+file path=opt/zfs-tests/tests/functional/trim/setup mode=0555
+file path=opt/zfs-tests/tests/functional/trim/trim.cfg mode=0444
+file path=opt/zfs-tests/tests/functional/trim/trim.kshlib mode=0444
 file path=opt/zfs-tests/tests/functional/truncate/cleanup mode=0555
 file path=opt/zfs-tests/tests/functional/truncate/setup mode=0555
 file path=opt/zfs-tests/tests/functional/truncate/truncate.cfg mode=0444

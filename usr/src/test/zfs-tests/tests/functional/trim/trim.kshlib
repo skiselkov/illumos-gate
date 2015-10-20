@@ -1,0 +1,110 @@
+#!/bin/ksh -p
+#
+# This file and its contents are supplied under the terms of the
+# Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
+#
+# A full copy of the text of the CDDL should have accompanied this
+# source.  A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
+#
+
+#
+# Copyright (c) 2017 by Tim Chase. All rights reserved.
+# Copyright (c) 2017 by Nexenta Systems, Inc. All rights reserved.
+#
+
+# Adaptation from older zfs-tests
+if [ -z "$ZPOOL" ]; then
+	ZPOOL=zpool
+fi
+if [ -z "$ZFS" ]; then
+	ZFS=zfs
+fi
+if [ -z "$FILE_WRITE" ]; then
+	FILE_WRITE=file_write
+fi
+
+function set_tunable64
+{
+	set_tunable_impl "$1" "$2" Z
+}
+
+function set_tunable32
+{
+	set_tunable_impl "$1" "$2" W
+}
+
+function set_tunable_impl
+{
+	typeset tunable="$1"
+	typeset value="$2"
+	typeset mdb_cmd="$3"
+
+	[[ -z "$tunable" ]] && return 1
+	[[ -z "$value" ]] && return 1
+	[[ -z "$mdb_cmd" ]] && return 1
+
+	case "$(uname)" in
+	Linux)
+		typeset zfs_tunables="/sys/module/zfs/parameters"
+		[[ -f "$zfs_tunables/$tunable" ]] || return 1
+		echo -n "$value" > "$zfs_tunables/$tunable"
+		return "$?"
+		;;
+	SunOS)
+		echo "${tunable}/${mdb_cmd}0t${value}" | mdb -kw
+		return "$?"
+		;;
+	esac
+}
+
+function setupvdevs
+{
+	log_must rm -f $VDEVS
+	log_must truncate -s $VDEV_SIZE $VDEVS
+}
+
+function getsizemb
+{
+	case "$(uname)" in
+	Linux)
+		typeset rval
+		rval=$(du --block-size 1048576 -s "$1" | awk '{print $1}')
+		echo -n "$rval"
+		;;
+	SunOS)
+		du -m "$1" | awk '{print $1}'
+		;;
+	esac
+}
+
+function checkvdevs
+{
+	typeset vd sz
+
+	for vd in $VDEVS; do
+		sz=$(getsizemb $vd)
+		log_note Size of $vd is $sz MB
+		log_must test $sz -le $SHRUNK_SIZE_MB
+	done
+	# If all checks succeeded, remove the vdevs to clean up
+	log_must rm $VDEVS
+}
+
+function checkpool
+{
+	typeset pool="$1"
+
+	log_must $ZPOOL scrub $pool
+	while true; do
+		typeset st=$($ZPOOL status $pool | awk '/scan:/{print $3}')
+		if [[ "$st" == "repaired" ]] || [[ "$st" == "canceled" ]]; then
+			break
+		fi
+		log_note "Waiting for scrub to complete on $pool"
+		sleep 1
+	done
+	log_must $ZPOOL status -x $TRIMPOOL
+}

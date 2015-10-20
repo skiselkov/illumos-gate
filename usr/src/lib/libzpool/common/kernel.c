@@ -22,6 +22,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
  * Copyright (c) 2013, Joyent, Inc.  All rights reserved.
+ * Copyright 2017 Nexenta Systems, Inc. All rights reserved.
  */
 
 #include <assert.h>
@@ -886,6 +887,14 @@ ddi_strtoull(const char *str, char **nptr, int base, u_longlong_t *result)
 	*result = strtoull(str, &end, base);
 	if (*result == 0)
 		return (errno);
+	return (0);
+}
+
+/* ARGSUSED */
+int
+ddi_copyin(const void *buf, void *driverbuf, size_t cn, int flags)
+{
+	bcopy(buf, driverbuf, cn);
 	return (0);
 }
 

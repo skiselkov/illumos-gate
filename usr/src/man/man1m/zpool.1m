@@ -21,7 +21,7 @@
 .\"
 .\" Copyright (c) 2007, Sun Microsystems, Inc. All Rights Reserved.
 .\" Copyright (c) 2013 by Delphix. All rights reserved.
-.\" Copyright 2016 Nexenta Systems, Inc.
+.\" Copyright 2017 Nexenta Systems, Inc.
 .\"
 .Dd March 30, 2016
 .Dt ZPOOL 1M
@@ -137,6 +137,10 @@
 .Nm
 .Cm scrub
 .Op Fl s
+.Ar pool Ns ...
+.Nm
+.Cm trim
+.Op Fl r Ar rate | Fl s
 .Ar pool Ns ...
 .Nm
 .Cm set
@@ -595,6 +599,42 @@ blocked.
 .It Sy panic
 Prints out a message to the console and generates a system crash dump.
 .El
+.It Sy autotrim Ns = Ns Sy on Ns | Ns Sy off
+When set to
+.Sy on Ns , while deleting data, ZFS will inform the underlying vdevs of any
+blocks that have been marked as freed. This allows thinly provisioned vdevs to
+reclaim unused blocks. Currently, this feature supports sending SCSI UNMAP
+commands to SCSI and SAS disk vdevs, SATA TRIM commands to SATA disk vdevs, and
+using file hole punching on file-backed vdevs. The default setting for this
+property is
+.Sy off .
+.Pp
+Please note that automatic trimming of data blocks can put significant stress
+on the underlying storage devices if they do not handle these commands in a
+background, low-priority manner. In that case, it may be possible to achieve
+most of the benefits of trimming free space on the pool by running a manual
+trim every once in a while during a maintenance window using the
+.Nm zpool Cm trim
+command.
+.Pp
+Automatic trim does not reclaim blocks after a delete immediately. Instead,
+it waits approximately 32-64 TXGs (or as defined by the
+.Nm zfs_txgs_per_trim
+tunable) to allow for more efficient aggregation of smaller portions of free
+space into fewer larger regions, as well as to allow for longer pool
+corruption recovery via
+.Nm zpool Cm import Fl F .
+.It Sy forcetrim Ns = Ns Sy on Ns | Ns Sy off
+Controls whether device support is taken into consideration when issuing
+TRIM commands to the underlying vdevs of the pool. Normally, both automatic
+trim and manual trim only issue TRIM commands if a vdev indicates support
+for it. Setting the
+.Sy forcetrim
+property to
+.Sy on
+will force ZFS to issue TRIMs even if it thinks a device does not support it.
+The default is
+.Sy off .
 .It Sy feature@ Ns Ar feature_name Ns = Ns Sy enabled
 The value of this property is the current state of
 .Ar feature_name .
@@ -1339,6 +1379,72 @@ does not allow a scrub to be started until the resilver completes.
 .Bl -tag -width Ds
 .It Fl s
 Stop scrubbing.
+.El
+.It Xo
+.Nm
+.Cm trim
+.Op Fl r Ar rate | Fl s
+.Ar pool Ns ...
+.Xc
+Initiates a manual TRIM operation on all of the free space of a pool.
+This informs the underlying storage devices of all of the blocks that
+the pool no longer considers allocated, thus allowing thinly provisioned
+storage devices to reclaim them. Please note that this collects all
+space marked as "freed" in the pool immediately and doesn't wait the
+.Nm zfs_txgs_per_trim
+delay as automatic TRIM does. Hence, this can limit pool corruption recovery
+options during and immediately following the manual TRIM to 1-2 TXGs into the
+past (instead of the standard 32-64 of automatic TRIM). This approach,
+however, allows you to recover the maximum amount of free space from the pool
+immediately without having to wait.
+.Pp
+Also note that a manual TRIM operation can be initiated irrespective of
+the
+.Sy autotrim
+zpool property setting. It does, however, respect the
+.Sy forcetrim
+zpool property.
+.Pp
+A manual TRIM operation does not conflict with an ongoing scrub, but it can
+put significant I/O stress on the underlying vdevs. A resilver, however,
+automatically stops a manual TRIM operation. You can manually reinitiate the
+TRIM operation after the resilver has started, by simply reissuing the
+.Nm zpool Cm trim
+command.
+.Pp
+Adding a vdev during TRIM is supported, although the progression display in
+.Nm zpool Cm status
+might not be entirely accurate in that case (TRIM will complete before
+reaching 100%). Removing or detaching a vdev will prematurely terminate
+a manual TRIM operation.
+.Bl -tag -width Ds
+.It Fl r Ar rate
+Controls the speed at which the TRIM operation progresses. Without this
+option, TRIM is executed in parallel on all top-level vdevs as quickly
+as possible. This option allows you to control how fast (in bytes per
+second) the TRIM is executed. This rate is applied on a per-vdev basis,
+i.e. every top-level vdev in the pool tries to match this speed. The rate
+argument supports common multiplier suffixes such as `k' for kilobytes,
+`m' for megabytes and `g' for gigabytes per second.
+.Pp
+Due to limitations in how the algorithm is designed, TRIMs are executed
+in whole-metaslab increments. Each top-level vdev contains approximately
+200 metaslabs, so a rate-limited TRIM progresses in steps. It TRIMs
+one metaslab completely and then waits for a while so that over the
+whole device, the speed averages out.
+.Pp
+When a manual TRIM operation is already in progress, this option
+changes its rate. To change a rate-limited TRIM to an unlimited one,
+simply execute the
+.Nm zpool Cm trim
+command without a
+.Fl r
+option.
+.El
+.Bl -tag -width Ds
+.It Fl s
+Stop trimming. If a manual TRIM operation is not ongoing at the moment,
+this does nothing and the command returns success.
 .El
 .It Xo
 .Nm

@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2012, 2016 by Delphix. All rights reserved.
  * Copyright (c) 2012, Joyent, Inc. All rights reserved.
  */
@@ -480,6 +480,8 @@ extern int fop_getattr(vnode_t *vp, vattr_t *vap);
 #define	VOP_GETATTR(vp, vap, fl, cr, ct)  fop_getattr((vp), (vap));
 
 #define	VOP_FSYNC(vp, f, cr, ct)	fsync((vp)->v_fd)
+#define	VOP_SPACE(vp, cmd, flck, fl, off, cr, ct) \
+	fcntl((vp)->v_fd, cmd, (flck), sizeof (*(flck)))
 
 #define	VN_RELE(vp)	vn_close(vp)
 
@@ -531,6 +533,8 @@ extern void delay(clock_t ticks);
 
 #define	ptob(x)		((x) * PAGESIZE)
 
+#define	FKIOCTL		1
+
 extern uint64_t physmem;
 
 extern int highbit64(uint64_t i);
@@ -581,6 +585,8 @@ extern int ddi_strtoul(const char *str, char **nptr, int base,
 
 extern int ddi_strtoull(const char *str, char **nptr, int base,
     u_longlong_t *result);
+
+extern int ddi_copyin(const void *buf, void *driverbuf, size_t cn, int flags);
 
 /* ZFS Boot Related stuff. */
 

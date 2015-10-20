@@ -12,6 +12,7 @@
 #
 # Copyright (c) 2012, 2016 by Delphix. All rights reserved.
 # Copyright 2016, OmniTI Computer Consulting, Inc. All rights reserved.
+# Copyright 2017 Nexenta Systems, Inc. All rights reserved.
 #
 
 [DEFAULT]
@@ -517,6 +518,9 @@ tests = ['sparse_001_pos']
 
 [/opt/zfs-tests/tests/functional/threadsappend]
 tests = ['threadsappend_001_pos']
+
+[/opt/zfs-tests/tests/functional/trim]
+tests = ['autotrim_001_pos', 'manualtrim_001_pos']
 
 [/opt/zfs-tests/tests/functional/truncate]
 tests = ['truncate_001_pos', 'truncate_002_pos']

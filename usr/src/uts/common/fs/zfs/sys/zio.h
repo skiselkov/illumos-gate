@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2012, 2017 by Delphix. All rights reserved.
  * Copyright (c) 2013 by Saso Kiselkov. All rights reserved.
  * Copyright (c) 2013, Joyent, Inc. All rights reserved.
@@ -38,6 +38,7 @@
 #include <sys/avl.h>
 #include <sys/fs/zfs.h>
 #include <sys/zio_impl.h>
+#include <sys/dkio.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -233,6 +234,9 @@ typedef void zio_done_func_t(zio_t *zio);
 
 extern boolean_t zio_dva_throttle_enabled;
 extern const char *zio_type_name[ZIO_TYPES];
+extern boolean_t zfs_trim;
+
+struct range_tree;
 
 /*
  * A bookmark is a four-tuple <objset, object, level, blkid> that uniquely
@@ -286,6 +290,9 @@ typedef struct zbookmark_phys {
 	((zb)->zb_object == ZB_ROOT_OBJECT &&	\
 	(zb)->zb_level == ZB_ROOT_LEVEL &&	\
 	(zb)->zb_blkid == ZB_ROOT_BLKID)
+
+#define	ZIO_IS_TRIM(zio)	\
+	((zio)->io_type == ZIO_TYPE_IOCTL && (zio)->io_cmd == DKIOCFREE)
 
 typedef struct zio_prop {
 	enum zio_checksum	zp_checksum;
@@ -411,6 +418,10 @@ struct zio {
 	/* io_lsize != io_orig_size iff this is a raw write */
 	uint64_t	io_lsize;
 
+	/* Used by trim zios */
+	dkioc_free_list_t	*io_dfl;
+	boolean_t		io_dfl_free_on_destroy;
+
 	/* Stuff for the vdev stack */
 	vdev_t		*io_vd;
 	void		*io_vsd;
@@ -489,6 +500,14 @@ extern zio_t *zio_claim(zio_t *pio, spa_t *spa, uint64_t txg,
 
 extern zio_t *zio_ioctl(zio_t *pio, spa_t *spa, vdev_t *vd, int cmd,
     zio_done_func_t *done, void *private, enum zio_flag flags);
+
+extern zio_t *zio_trim_dfl(zio_t *pio, spa_t *spa, vdev_t *vd,
+    dkioc_free_list_t *dfl, boolean_t dfl_free_on_destroy, boolean_t auto_trim,
+    zio_done_func_t *done, void *private);
+
+extern zio_t *zio_trim_tree(zio_t *pio, spa_t *spa, vdev_t *vd,
+    struct range_tree *tree, boolean_t auto_trim, zio_done_func_t *done,
+    void *private, int dkiocfree_flags, metaslab_t *msp);
 
 extern zio_t *zio_read_phys(zio_t *pio, vdev_t *vd, uint64_t offset,
     uint64_t size, void *data, int checksum,

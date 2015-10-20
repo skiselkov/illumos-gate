@@ -26,6 +26,7 @@
 /*
  * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
+ * Copyright 2017 Nexenta Systems, Inc. All rights reserved.
  */
 
 #include <sys/zfs_context.h>
@@ -147,6 +148,8 @@ uint32_t zfs_vdev_async_write_min_active = 1;
 uint32_t zfs_vdev_async_write_max_active = 10;
 uint32_t zfs_vdev_scrub_min_active = 1;
 uint32_t zfs_vdev_scrub_max_active = 2;
+uint32_t zfs_vdev_trim_min_active = 1;
+uint32_t zfs_vdev_trim_max_active = 10;
 
 /*
  * When the pool has less than zfs_vdev_async_write_active_min_dirty_percent
@@ -213,11 +216,14 @@ vdev_queue_class_tree(vdev_queue_t *vq, zio_priority_t p)
 static inline avl_tree_t *
 vdev_queue_type_tree(vdev_queue_t *vq, zio_type_t t)
 {
-	ASSERT(t == ZIO_TYPE_READ || t == ZIO_TYPE_WRITE);
+	ASSERT(t == ZIO_TYPE_READ || t == ZIO_TYPE_WRITE ||
+	    t == ZIO_TYPE_IOCTL);
 	if (t == ZIO_TYPE_READ)
 		return (&vq->vq_read_offset_tree);
-	else
+	else if (t == ZIO_TYPE_WRITE)
 		return (&vq->vq_write_offset_tree);
+	else
+		return (NULL);
 }
 
 int
@@ -263,8 +269,12 @@ vdev_queue_init(vdev_t *vd)
 		 * The synchronous i/o queues are dispatched in FIFO rather
 		 * than LBA order.  This provides more consistent latency for
 		 * these i/os.
+		 * The same is true of the TRIM queue, where LBA ordering
+		 * doesn't help.
 		 */
-		if (p == ZIO_PRIORITY_SYNC_READ || p == ZIO_PRIORITY_SYNC_WRITE)
+		if (p == ZIO_PRIORITY_SYNC_READ ||
+		    p == ZIO_PRIORITY_SYNC_WRITE ||
+		    p == ZIO_PRIORITY_AUTO_TRIM || p == ZIO_PRIORITY_MAN_TRIM)
 			compfn = vdev_queue_timestamp_compare;
 		else
 			compfn = vdev_queue_offset_compare;
@@ -292,10 +302,13 @@ static void
 vdev_queue_io_add(vdev_queue_t *vq, zio_t *zio)
 {
 	spa_t *spa = zio->io_spa;
+	avl_tree_t *qtt;
 
 	ASSERT3U(zio->io_priority, <, ZIO_PRIORITY_NUM_QUEUEABLE);
 	avl_add(vdev_queue_class_tree(vq, zio->io_priority), zio);
-	avl_add(vdev_queue_type_tree(vq, zio->io_type), zio);
+	qtt = vdev_queue_type_tree(vq, zio->io_type);
+	if (qtt != NULL)
+		avl_add(qtt, zio);
 
 	mutex_enter(&spa->spa_iokstat_lock);
 	spa->spa_queue_stats[zio->io_priority].spa_queued++;
@@ -308,10 +321,13 @@ static void
 vdev_queue_io_remove(vdev_queue_t *vq, zio_t *zio)
 {
 	spa_t *spa = zio->io_spa;
+	avl_tree_t *qtt;
 
 	ASSERT3U(zio->io_priority, <, ZIO_PRIORITY_NUM_QUEUEABLE);
 	avl_remove(vdev_queue_class_tree(vq, zio->io_priority), zio);
-	avl_remove(vdev_queue_type_tree(vq, zio->io_type), zio);
+	qtt = vdev_queue_type_tree(vq, zio->io_type);
+	if (qtt != NULL)
+		avl_remove(qtt, zio);
 
 	mutex_enter(&spa->spa_iokstat_lock);
 	ASSERT3U(spa->spa_queue_stats[zio->io_priority].spa_queued, >, 0);
@@ -393,6 +409,9 @@ vdev_queue_class_min_active(zio_priority_t p)
 		return (zfs_vdev_async_write_min_active);
 	case ZIO_PRIORITY_SCRUB:
 		return (zfs_vdev_scrub_min_active);
+	case ZIO_PRIORITY_AUTO_TRIM:
+	case ZIO_PRIORITY_MAN_TRIM:
+		return (zfs_vdev_trim_min_active);
 	default:
 		panic("invalid priority %u", p);
 		return (0);
@@ -452,6 +471,9 @@ vdev_queue_class_max_active(spa_t *spa, zio_priority_t p)
 		return (vdev_queue_max_async_writes(spa));
 	case ZIO_PRIORITY_SCRUB:
 		return (zfs_vdev_scrub_max_active);
+	case ZIO_PRIORITY_AUTO_TRIM:
+	case ZIO_PRIORITY_MAN_TRIM:
+		return (zfs_vdev_trim_max_active);
 	default:
 		panic("invalid priority %u", p);
 		return (0);
@@ -664,7 +686,7 @@ again:
 	 * For LBA-ordered queues (async / scrub), issue the i/o which follows
 	 * the most recently issued i/o in LBA (offset) order.
 	 *
-	 * For FIFO queues (sync), issue the i/o with the lowest timestamp.
+	 * For FIFO queues (sync/trim), issue the i/o with the lowest timestamp.
 	 */
 	tree = vdev_queue_class_tree(vq, p);
 	search.io_timestamp = 0;
@@ -696,7 +718,10 @@ again:
 	}
 
 	vdev_queue_pending_add(vq, zio);
-	vq->vq_last_offset = zio->io_offset;
+	/* trim I/Os have no single meaningful offset */
+	if (zio->io_priority != ZIO_PRIORITY_AUTO_TRIM ||
+	    zio->io_priority != ZIO_PRIORITY_MAN_TRIM)
+		vq->vq_last_offset = zio->io_offset;
 
 	return (zio);
 }
@@ -719,11 +744,12 @@ vdev_queue_io(zio_t *zio)
 		    zio->io_priority != ZIO_PRIORITY_ASYNC_READ &&
 		    zio->io_priority != ZIO_PRIORITY_SCRUB)
 			zio->io_priority = ZIO_PRIORITY_ASYNC_READ;
-	} else {
-		ASSERT(zio->io_type == ZIO_TYPE_WRITE);
+	} else if (zio->io_type == ZIO_TYPE_WRITE) {
 		if (zio->io_priority != ZIO_PRIORITY_SYNC_WRITE &&
 		    zio->io_priority != ZIO_PRIORITY_ASYNC_WRITE)
 			zio->io_priority = ZIO_PRIORITY_ASYNC_WRITE;
+	} else {
+		ASSERT(ZIO_IS_TRIM(zio));
 	}
 
 	zio->io_flags |= ZIO_FLAG_DONT_CACHE | ZIO_FLAG_DONT_QUEUE;

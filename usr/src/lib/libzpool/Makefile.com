@@ -21,6 +21,7 @@
 #
 # Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright (c) 2013, 2015 by Delphix. All rights reserved.
+# Copyright 2017 Nexenta Systems, Inc. All rights reserved.
 #
 
 LIBRARY= libzpool.a
@@ -28,7 +29,7 @@ VERS= .1
 
 # include the list of ZFS sources
 include ../../../uts/common/Makefile.files
-KERNEL_OBJS = kernel.o taskq.o util.o
+KERNEL_OBJS = kernel.o taskq.o util.o dkioc_free_util.o
 DTRACE_OBJS = zfs.o
 
 OBJECTS=$(ZFS_COMMON_OBJS) $(ZFS_SHARED_OBJS) $(KERNEL_OBJS)
@@ -99,3 +100,7 @@ pics/%.o: ../common/%.d $(PICS)
 
 ../common/%.h: ../common/%.d
 	$(DTRACE) -xnolibs -h -s $< -o $@
+
+pics/%.o: ../../../uts/common/os/%.c
+	$(COMPILE.c) -o $@ $<
+	$(POST_PROCESS_O)

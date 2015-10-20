@@ -19,6 +19,7 @@
 
 /*
  * Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
+ * Copyright (c) 2017 Nexenta Systems, Inc. All rights reserved.
  */
 
 /*
@@ -2049,7 +2050,7 @@ iwn_reset_tx_ring(struct iwn_softc *sc, struct iwn_tx_ring *ring)
 		}
 
 	/* Clear TX descriptors. */
-	memset(ring->desc, 0, ring->desc_dma.size);
+	(void) memset(ring->desc, 0, ring->desc_dma.size);
 	(void) ddi_dma_sync(ring->desc_dma.dma_hdl, 0, 0, DDI_DMA_SYNC_FORDEV);
 	sc->qfullmsk &= ~(1 << ring->qid);
 	ring->queued = 0;
@@ -2080,7 +2081,7 @@ iwn5000_ict_reset(struct iwn_softc *sc)
 	IWN_WRITE(sc, IWN_INT_MASK, 0);
 
 	/* Reset ICT table. */
-	memset(sc->ict, 0, IWN_ICT_SIZE);
+	(void) memset(sc->ict, 0, IWN_ICT_SIZE);
 	sc->ict_cur = 0;
 
 	/* Set physical address of ICT table (4KB aligned). */
@@ -2376,7 +2377,7 @@ iwn_read_eeprom_enhinfo(struct iwn_softc *sc)
 	iwn_read_prom_data(sc, base + IWN6000_EEPROM_ENHINFO,
 	    enhinfo, sizeof enhinfo);
 
-	memset(sc->enh_maxpwr, 0, sizeof sc->enh_maxpwr);
+	(void) memset(sc->enh_maxpwr, 0, sizeof sc->enh_maxpwr);
 	for (i = 0; i < __arraycount(enhinfo); i++) {
 		if (enhinfo[i].chan == 0 || enhinfo[i].reserved != 0)
 			continue;	/* Skip invalid entries. */
@@ -2635,7 +2636,7 @@ iwn_rx_phy(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 	DTRACE_PROBE1(rx__phy, struct iwn_rx_stat *, stat);
 
 	/* Save RX statistics, they will be used on MPDU_RX_DONE. */
-	memcpy(&sc->last_rx_stat, stat, sizeof (*stat));
+	(void) memcpy(&sc->last_rx_stat, stat, sizeof (*stat));
 	sc->last_rx_valid = 1;
 }
 
@@ -2818,7 +2819,7 @@ iwn5000_rx_calib_results(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 		return;
 	}
 	sc->calibcmd[idx].len = len;
-	memcpy(sc->calibcmd[idx].buf, calib, len);
+	(void) memcpy(sc->calibcmd[idx].buf, calib, len);
 }
 
 /*
@@ -3088,7 +3089,7 @@ iwn_notif_intr(struct iwn_softc *sc)
 			}
 			if (uc->subtype == IWN_UCODE_INIT) {
 				/* Save microcontroller report. */
-				memcpy(&sc->ucode_info, uc, sizeof (*uc));
+				(void) memcpy(&sc->ucode_info, uc, sizeof (*uc));
 			}
 			/* Save the address of the error log in SRAM. */
 			sc->errptr = le32toh(uc->errptr);
@@ -3930,7 +3931,7 @@ iwn_send(ieee80211com_t *ic, mblk_t *mp, uint8_t type)
 
 	/* Copy 802.11 header in TX command. */
 	/* XXX NetBSD changed this in rev 1.20 */
-	memcpy(((uint8_t *)tx) + sizeof(*tx), wh, hdrlen);
+	(void) memcpy(((uint8_t *)tx) + sizeof(*tx), wh, hdrlen);
 	mp->b_rptr += hdrlen;
 
 	bcopy(mp->b_rptr, data->dma_data.vaddr, totlen - hdrlen);
@@ -4431,7 +4432,7 @@ iwn_cmd(struct iwn_softc *sc, uint8_t code, void *buf, int size, int async)
 	cmd->qid = ring->qid;
 	cmd->idx = ring->cur;
 	bzero(cmd->data, size);
-	memcpy(cmd->data, buf, size);
+	(void) memcpy(cmd->data, buf, size);
 
 	bzero(desc, sizeof(*desc));
 	desc->nsegs = 1;
@@ -4485,9 +4486,9 @@ iwn4965_add_node(struct iwn_softc *sc, struct iwn_node_info *node, int async)
 	 */
 	src = (char *)node;
 	dst = (char *)&hnode;
-	memcpy(dst, src, 48);
+	(void) memcpy(dst, src, 48);
 	/* Skip TSC, RX MIC and TX MIC fields from ``src''. */
-	memcpy(dst + 48, src + 72, 20);
+	(void) memcpy(dst + 48, src + 72, 20);
 	return iwn_cmd(sc, IWN_CMD_ADD_NODE, &hnode, sizeof hnode, async);
 }
 
@@ -4511,7 +4512,7 @@ iwn_set_link_quality(struct iwn_softc *sc, struct ieee80211_node *ni)
 	/* Use the first valid TX antenna. */
 	txant = IWN_LSB(sc->txchainmask);
 
-	memset(&linkq, 0, sizeof linkq);
+	(void) memset(&linkq, 0, sizeof linkq);
 	linkq.id = wn->id;
 	linkq.antmsk_1stream = txant;
 	linkq.antmsk_2stream = IWN_ANT_AB;
@@ -4546,7 +4547,7 @@ iwn_add_broadcast_node(struct iwn_softc *sc, int async)
 	uint8_t txant;
 	int i, error;
 
-	memset(&node, 0, sizeof node);
+	(void) memset(&node, 0, sizeof node);
 	IEEE80211_ADDR_COPY(node.macaddr, etherbroadcastaddr);
 	node.id = sc->broadcast_id;
 	DTRACE_PROBE(add__broadcast__node);
@@ -4556,7 +4557,7 @@ iwn_add_broadcast_node(struct iwn_softc *sc, int async)
 	/* Use the first valid TX antenna. */
 	txant = IWN_LSB(sc->txchainmask);
 
-	memset(&linkq, 0, sizeof linkq);
+	(void) memset(&linkq, 0, sizeof linkq);
 	linkq.id = sc->broadcast_id;
 	linkq.antmsk_1stream = txant;
 	linkq.antmsk_2stream = IWN_ANT_AB;
@@ -4617,7 +4618,7 @@ iwn_set_critical_temp(struct iwn_softc *sc)
 
 	sc->sc_misc->crit_temp.value.ul = temp;
 
-	memset(&crit, 0, sizeof crit);
+	(void) memset(&crit, 0, sizeof crit);
 	crit.tempR = htole32(temp);
 	return iwn_cmd(sc, IWN_CMD_SET_CRITICAL_TEMP, &crit, sizeof crit, 0);
 }
@@ -4628,8 +4629,8 @@ iwn_set_timing(struct iwn_softc *sc, struct ieee80211_node *ni)
 	struct iwn_cmd_timing cmd;
 	uint64_t val, mod;
 
-	memset(&cmd, 0, sizeof cmd);
-	memcpy(&cmd.tstamp, ni->in_tstamp.data, sizeof (uint64_t));
+	(void) memset(&cmd, 0, sizeof cmd);
+	(void) memcpy(&cmd.tstamp, ni->in_tstamp.data, sizeof (uint64_t));
 	cmd.bintval = htole16(ni->in_intval);
 	cmd.lintval = htole16(10);
 
@@ -4688,7 +4689,7 @@ iwn4965_set_txpower(struct iwn_softc *sc, int async)
 	sc->sc_txpower->chan.value.l = chan;
 	ch = &ic->ic_sup_channels[chan];
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	cmd.band = IEEE80211_IS_CHAN_5GHZ(ch) ? 0 : 1;
 	cmd.chan = chan;
 
@@ -4813,7 +4814,7 @@ iwn5000_set_txpower(struct iwn_softc *sc, int async)
 	 * TX power calibration is handled automatically by the firmware
 	 * for 5000 Series.
 	 */
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	cmd.global_limit = 2 * IWN5000_TXPOWER_MAX_DBM;	/* 16 dBm */
 	cmd.flags = IWN5000_TXPOWER_NO_CLOSED;
 	cmd.srv_limit = IWN5000_TXPOWER_AUTO;
@@ -4935,7 +4936,7 @@ iwn_init_sensitivity(struct iwn_softc *sc)
 	int error;
 
 	/* Reset calibration state machine. */
-	memset(calib, 0, sizeof (*calib));
+	(void) memset(calib, 0, sizeof (*calib));
 	calib->state = IWN_CALIB_STATE_INIT;
 	calib->cck_state = IWN_CCK_STATE_HIFA;
 	/* Set initial correlation values. */
@@ -5019,7 +5020,7 @@ iwn4965_init_gains(struct iwn_softc *sc)
 {
 	struct iwn_phy_calib_gain cmd;
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	cmd.code = IWN4965_PHY_CALIB_DIFF_GAIN;
 	/* Differential gains initially set to 0 for all 3 antennas. */
 	return iwn_cmd(sc, IWN_CMD_PHY_CALIB, &cmd, sizeof cmd, 1);
@@ -5030,7 +5031,7 @@ iwn5000_init_gains(struct iwn_softc *sc)
 {
 	struct iwn_phy_calib cmd;
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	cmd.code = sc->reset_noise_gain;
 	cmd.ngroups = 1;
 	cmd.isvalid = 1;
@@ -5050,7 +5051,7 @@ iwn4965_set_gains(struct iwn_softc *sc)
 		if (sc->chainmask & (1 << i))
 			noise = MIN(calib->noise[i], noise);
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	cmd.code = IWN4965_PHY_CALIB_DIFF_GAIN;
 	/* Set differential gains for connected antennas. */
 	for (i = 0; i < 3; i++) {
@@ -5078,7 +5079,7 @@ iwn5000_set_gains(struct iwn_softc *sc)
 	/* We collected 20 beacons and !=6050 need a 1.5 factor. */
 	div = (sc->hw_type == IWN_HW_REV_TYPE_6050) ? 20 : 30;
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	cmd.code = sc->noise_gain;
 	cmd.ngroups = 1;
 	cmd.isvalid = 1;
@@ -5257,7 +5258,7 @@ iwn_send_sensitivity(struct iwn_softc *sc)
 	struct iwn_enhanced_sensitivity_cmd cmd;
 	int len;
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	len = sizeof (struct iwn_sensitivity_cmd);
 	cmd.which = IWN_SENSITIVITY_WORKTBL;
 	/* OFDM modulation. */
@@ -5320,7 +5321,7 @@ iwn_set_pslevel(struct iwn_softc *sc, int dtim, int level, int async)
 	else
 		pmgt = &iwn_pmgt[2][level];
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	if (level != 0)	/* not CAM */
 		cmd.flags |= htole16(IWN_PS_ALLOW_SLEEP);
 	if (level == 5)
@@ -5359,7 +5360,7 @@ iwn5000_runtime_calib(struct iwn_softc *sc)
 {
 	struct iwn5000_calib_config cmd;
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	cmd.ucode.once.enable = 0xffffffff;
 	cmd.ucode.once.start = IWN5000_CALIB_DC;
 	return iwn_cmd(sc, IWN5000_CMD_CALIB_CONFIG, &cmd, sizeof(cmd), 0);
@@ -5370,7 +5371,7 @@ iwn_config_bt_coex_bluetooth(struct iwn_softc *sc)
 {
 	struct iwn_bluetooth bluetooth;
 
-	memset(&bluetooth, 0, sizeof bluetooth);
+	(void) memset(&bluetooth, 0, sizeof bluetooth);
 	bluetooth.flags = IWN_BT_COEX_ENABLE;
 	bluetooth.lead_time = IWN_BT_LEAD_TIME_DEF;
 	bluetooth.max_kill = IWN_BT_MAX_KILL_DEF;
@@ -5383,7 +5384,7 @@ iwn_config_bt_coex_prio_table(struct iwn_softc *sc)
 {
 	uint8_t prio_table[16];
 
-	memset(&prio_table, 0, sizeof prio_table);
+	(void) memset(&prio_table, 0, sizeof prio_table);
 	prio_table[ 0] =  6;	/* init calibration 1		*/
 	prio_table[ 1] =  7;	/* init calibration 2		*/
 	prio_table[ 2] =  2;	/* periodic calib low 1		*/
@@ -5443,7 +5444,7 @@ iwn_config_bt_coex_adv_config(struct iwn_softc *sc, struct iwn_bt_basic *basic,
 	}
 
 	/* Force BT state machine change */
-	memset(&btprot, 0, sizeof btprot);
+	(void) memset(&btprot, 0, sizeof btprot);
 	btprot.open = 1;
 	btprot.type = 1;
 	error = iwn_cmd(sc, IWN_CMD_BT_COEX_PROT, &btprot, sizeof btprot, 1);
@@ -5466,7 +5467,7 @@ iwn_config_bt_coex_adv1(struct iwn_softc *sc)
 {
 	struct iwn_bt_adv1 d;
 
-	memset(&d, 0, sizeof d);
+	(void) memset(&d, 0, sizeof d);
 	d.prio_boost = IWN_BT_PRIO_BOOST_DEF;
 	d.tx_prio_boost = 0;
 	d.rx_prio_boost = 0;
@@ -5478,7 +5479,7 @@ iwn_config_bt_coex_adv2(struct iwn_softc *sc)
 {
 	struct iwn_bt_adv2 d;
 
-	memset(&d, 0, sizeof d);
+	(void) memset(&d, 0, sizeof d);
 	d.prio_boost = IWN_BT_PRIO_BOOST_DEF;
 	d.tx_prio_boost = 0;
 	d.rx_prio_boost = 0;
@@ -5547,7 +5548,7 @@ iwn_config(struct iwn_softc *sc)
 	}
 
 	/* Set mode, channel, RX filter and enable RX. */
-	memset(&sc->rxon, 0, sizeof (struct iwn_rxon));
+	(void) memset(&sc->rxon, 0, sizeof (struct iwn_rxon));
 	IEEE80211_ADDR_COPY(sc->rxon.myaddr, ic->ic_macaddr);
 	IEEE80211_ADDR_COPY(sc->rxon.wlap, ic->ic_macaddr);
 	sc->rxon.chan = ieee80211_chan2ieee(ic, ic->ic_ibss_chan);
@@ -5758,14 +5759,14 @@ iwn_scan(struct iwn_softc *sc, uint16_t flags)
 	essid = (struct iwn_scan_essid *)(tx + 1);
 	if (ic->ic_des_esslen != 0) {
 		char essidstr[IEEE80211_NWID_LEN+1];
-		memcpy(essidstr, ic->ic_des_essid, ic->ic_des_esslen);
+		(void) memcpy(essidstr, ic->ic_des_essid, ic->ic_des_esslen);
 		essidstr[ic->ic_des_esslen] = '\0';
 
 		DTRACE_PROBE1(scan__direct, char *, essidstr);
 
 		essid[0].id = IEEE80211_ELEMID_SSID;
 		essid[0].len = ic->ic_des_esslen;
-		memcpy(essid[0].data, ic->ic_des_essid, ic->ic_des_esslen);
+		(void) memcpy(essid[0].data, ic->ic_des_essid, ic->ic_des_esslen);
 
 		is_active = 1;
 		/* hdr->crc_threshold = 0x1; */
@@ -6039,7 +6040,7 @@ iwn_run(struct iwn_softc *sc)
 	iwn_newassoc(ni, 1);
 
 	/* Add BSS node. */
-	memset(&node, 0, sizeof node);
+	(void) memset(&node, 0, sizeof node);
 	IEEE80211_ADDR_COPY(node.macaddr, ni->in_macaddr);
 	node.id = IWN_ID_BSS;
 #ifdef notyet
@@ -6104,14 +6105,14 @@ iwn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 	if (k->k_flags & IEEE80211_KEY_GROUP)
 		kflags |= IWN_KFLAG_GROUP;
 
-	memset(&node, 0, sizeof node);
+	(void) memset(&node, 0, sizeof node);
 	node.id = (k->k_flags & IEEE80211_KEY_GROUP) ?
 	    sc->broadcast_id : wn->id;
 	node.control = IWN_NODE_UPDATE;
 	node.flags = IWN_FLAG_SET_KEY;
 	node.kflags = htole16(kflags);
 	node.kid = k->k_id;
-	memcpy(node.key, k->k_key, k->k_len);
+	(void) memcpy(node.key, k->k_key, k->k_len);
 	DTRACE_PROBE2(set__key, int, k->k_id, int, node.id);
 	return ops->add_node(sc, &node, 1);
 }
@@ -6133,7 +6134,7 @@ iwn_delete_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 	}
 	if (ic->ic_state != IEEE80211_S_RUN)
 		return;	/* Nothing to do. */
-	memset(&node, 0, sizeof node);
+	(void) memset(&node, 0, sizeof node);
 	node.id = (k->k_flags & IEEE80211_KEY_GROUP) ?
 	    sc->broadcast_id : wn->id;
 	node.control = IWN_NODE_UPDATE;
@@ -6160,7 +6161,7 @@ iwn_ampdu_rx_start(struct ieee80211com *ic, struct ieee80211_node *ni,
 	struct iwn_node *wn = (void *)ni;
 	struct iwn_node_info node;
 
-	memset(&node, 0, sizeof node);
+	(void) memset(&node, 0, sizeof node);
 	node.id = wn->id;
 	node.control = IWN_NODE_UPDATE;
 	node.flags = IWN_FLAG_SET_ADDBA;
@@ -6183,7 +6184,7 @@ iwn_ampdu_rx_stop(struct ieee80211com *ic, struct ieee80211_node *ni,
 	struct iwn_node *wn = (void *)ni;
 	struct iwn_node_info node;
 
-	memset(&node, 0, sizeof node);
+	(void) memset(&node, 0, sizeof node);
 	node.id = wn->id;
 	node.control = IWN_NODE_UPDATE;
 	node.flags = IWN_FLAG_SET_DELBA;
@@ -6209,7 +6210,7 @@ iwn_ampdu_tx_start(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 	/* Enable TX for the specified RA/TID. */
 	wn->disable_tid &= ~(1 << tid);
-	memset(&node, 0, sizeof node);
+	(void) memset(&node, 0, sizeof node);
 	node.id = wn->id;
 	node.control = IWN_NODE_UPDATE;
 	node.flags = IWN_FLAG_SET_DISABLE_TID;
@@ -6373,7 +6374,7 @@ iwn5000_query_calibration(struct iwn_softc *sc)
 
 	ASSERT(mutex_owned(&sc->sc_mtx));
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	cmd.ucode.once.enable = 0xffffffff;
 	cmd.ucode.once.start  = 0xffffffff;
 	cmd.ucode.once.send   = 0xffffffff;
@@ -6427,14 +6428,14 @@ iwn5000_send_wimax_coex(struct iwn_softc *sc)
 		    IWN_WIMAX_COEX_UNASSOC_WA_UNMASK |
 		    IWN_WIMAX_COEX_STA_TABLE_VALID |
 		    IWN_WIMAX_COEX_ENABLE;
-		memcpy(wimax.events, iwn6050_wimax_events,
+		(void) memcpy(wimax.events, iwn6050_wimax_events,
 		    sizeof iwn6050_wimax_events);
 	} else
 #endif
 	{
 		/* Disable WiMAX coexistence. */
 		wimax.flags = 0;
-		memset(wimax.events, 0, sizeof wimax.events);
+		(void) memset(wimax.events, 0, sizeof wimax.events);
 	}
 	return iwn_cmd(sc, IWN5000_CMD_WIMAX_COEX, &wimax, sizeof wimax, 0);
 }
@@ -6444,7 +6445,7 @@ iwn6000_temp_offset_calib(struct iwn_softc *sc)
 {
 	struct iwn6000_phy_calib_temp_offset cmd;
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	cmd.code = IWN6000_PHY_CALIB_TEMP_OFFSET;
 	cmd.ngroups = 1;
 	cmd.isvalid = 1;
@@ -6461,7 +6462,7 @@ iwn2000_temp_offset_calib(struct iwn_softc *sc)
 {
 	struct iwn2000_phy_calib_temp_offset cmd;
 
-	memset(&cmd, 0, sizeof cmd);
+	(void) memset(&cmd, 0, sizeof cmd);
 	cmd.code = IWN2000_PHY_CALIB_TEMP_OFFSET;
 	cmd.ngroups = 1;
 	cmd.isvalid = 1;
@@ -6598,7 +6599,7 @@ iwn5000_post_alive(struct iwn_softc *sc)
 		struct iwn5000_phy_calib_crystal cmd;
 
 		/* Perform crystal calibration. */
-		memset(&cmd, 0, sizeof cmd);
+		(void) memset(&cmd, 0, sizeof cmd);
 		cmd.code = IWN5000_PHY_CALIB_CRYSTAL;
 		cmd.ngroups = 1;
 		cmd.isvalid = 1;
@@ -6689,8 +6690,8 @@ iwn4965_load_firmware(struct iwn_softc *sc)
 	ASSERT(mutex_owned(&sc->sc_mtx));
 
 	/* Copy initialization sections into pre-allocated DMA-safe memory. */
-	memcpy(dma->vaddr, fw->init.data, fw->init.datasz);
-	memcpy((char *)dma->vaddr + IWN4965_FW_DATA_MAXSZ,
+	(void) memcpy(dma->vaddr, fw->init.data, fw->init.datasz);
+	(void) memcpy((char *)dma->vaddr + IWN4965_FW_DATA_MAXSZ,
 	    fw->init.text, fw->init.textsz);
 	(void) ddi_dma_sync(dma->dma_hdl, 0, 0, DDI_DMA_SYNC_FORDEV);
 
@@ -6730,8 +6731,8 @@ iwn4965_load_firmware(struct iwn_softc *sc)
 	sc->sc_misc->temp.value.ul = sc->temp;
 
 	/* Copy runtime sections into pre-allocated DMA-safe memory. */
-	memcpy(dma->vaddr, fw->main.data, fw->main.datasz);
-	memcpy((char *)dma->vaddr + IWN4965_FW_DATA_MAXSZ,
+	(void) memcpy(dma->vaddr, fw->main.data, fw->main.datasz);
+	(void) memcpy((char *)dma->vaddr + IWN4965_FW_DATA_MAXSZ,
 	    fw->main.text, fw->main.textsz);
 	(void) ddi_dma_sync(dma->dma_hdl, 0, 0, DDI_DMA_SYNC_FORDEV);
 
@@ -6760,7 +6761,7 @@ iwn5000_load_firmware_section(struct iwn_softc *sc, uint32_t dst,
 	ASSERT(mutex_owned(&sc->sc_mtx));
 
 	/* Copy firmware section into pre-allocated DMA-safe memory. */
-	memcpy(dma->vaddr, section, size);
+	(void) memcpy(dma->vaddr, section, size);
 	(void) ddi_dma_sync(dma->dma_hdl, 0, 0, DDI_DMA_SYNC_FORDEV);
 
 	if ((error = iwn_nic_lock(sc)) != 0)
