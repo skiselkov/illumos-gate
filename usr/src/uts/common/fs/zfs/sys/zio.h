@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2012, 2016 by Delphix. All rights reserved.
  * Copyright (c) 2013 by Saso Kiselkov. All rights reserved.
  * Copyright (c) 2013, Joyent, Inc. All rights reserved.
@@ -243,6 +243,8 @@ typedef void zio_done_func_t(zio_t *zio);
 
 extern boolean_t zio_dva_throttle_enabled;
 extern const char *zio_type_name[ZIO_TYPES];
+
+struct range_tree;
 
 /*
  * A bookmark is a four-tuple <objset, object, level, blkid> that uniquely
@@ -491,6 +493,10 @@ extern zio_t *zio_claim(zio_t *pio, spa_t *spa, uint64_t txg,
 
 extern zio_t *zio_ioctl(zio_t *pio, spa_t *spa, vdev_t *vd, int cmd,
     zio_done_func_t *done, void *private, enum zio_flag flags);
+
+extern zio_t *zio_trim(spa_t *spa, vdev_t *vd, struct range_tree *tree,
+    zio_done_func_t *done, void *private, enum zio_flag flags,
+    int dkiocfree_flags, metaslab_t *msp);
 
 extern zio_t *zio_read_phys(zio_t *pio, vdev_t *vd, uint64_t offset,
     uint64_t size, void *data, int checksum,

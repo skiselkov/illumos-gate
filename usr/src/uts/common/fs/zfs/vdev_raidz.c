@@ -24,6 +24,7 @@
  * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
  * Copyright (c) 2013, Joyent, Inc. All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
+ * Copyright 2016 Nexenta Systems, Inc. All rights reserved.
  */
 
 #include <sys/zfs_context.h>
@@ -36,6 +37,7 @@
 #include <sys/zio_checksum.h>
 #include <sys/fs/zfs.h>
 #include <sys/fm/fs/zfs.h>
+#include <sys/dkioc_free_util.h>
 
 /*
  * Virtual device vector for RAID-Z.
@@ -238,6 +240,7 @@ static const uint8_t vdev_raidz_log2[256] = {
 };
 
 static void vdev_raidz_generate_parity(raidz_map_t *rm);
+static void vdev_raidz_trim_done(zio_t *zio);
 
 /*
  * Multiply a given number by 2 raised to the given power.
@@ -265,7 +268,9 @@ vdev_raidz_map_free(raidz_map_t *rm)
 	size_t size;
 
 	for (c = 0; c < rm->rm_firstdatacol; c++) {
-		zio_buf_free(rm->rm_col[c].rc_data, rm->rm_col[c].rc_size);
+		if (rm->rm_col[c].rc_data != NULL)
+			zio_buf_free(rm->rm_col[c].rc_data,
+			    rm->rm_col[c].rc_size);
 
 		if (rm->rm_col[c].rc_gdata != NULL)
 			zio_buf_free(rm->rm_col[c].rc_gdata,
@@ -438,12 +443,27 @@ static const zio_vsd_ops_t vdev_raidz_vsd_ops = {
 };
 
 /*
- * Divides the IO evenly across all child vdevs; usually, dcols is
- * the number of children in the target vdev.
+ * Allocates and computes a raidz column map, which directs the raidz column
+ * handling algorithms where to locate and store data and parity columns for
+ * a particular DVA. Usually, dcols is the number of children in the target
+ * vdev.
+ *
+ * The `io_offset', `io_size' and `io_data' hold the offset, size and data
+ * of the zio for which this map is to be computed.
+ * The `unit_shift' parameter contains the minimum allocation bitshift of
+ * the storage pool. The `dcols' parameter contains the number of drives in
+ * this raidz vdev (including parity drives), with `nparity' denoting how
+ * many those contain the parity (one, two or three).
+ *
+ * The `alloc_io_bufs' flag denotes whether you want the constructed raidz
+ * map to contain allocated buffers to hold column IO data or not (if
+ * you're using this function simply to determine raidz geometry, you'll
+ * want to pass B_FALSE here).
  */
 static raidz_map_t *
 vdev_raidz_map_alloc(caddr_t data, uint64_t size, uint64_t offset,
-    uint64_t unit_shift, uint64_t dcols, uint64_t nparity)
+    uint64_t unit_shift, uint64_t dcols, uint64_t nparity,
+    boolean_t alloc_data)
 {
 	raidz_map_t *rm;
 	/* The starting RAIDZ (parent) vdev sector of the block. */
@@ -537,14 +557,17 @@ vdev_raidz_map_alloc(caddr_t data, uint64_t size, uint64_t offset,
 	ASSERT3U(rm->rm_asize - asize, ==, rm->rm_nskip << unit_shift);
 	ASSERT3U(rm->rm_nskip, <=, nparity);
 
-	for (c = 0; c < rm->rm_firstdatacol; c++)
-		rm->rm_col[c].rc_data = zio_buf_alloc(rm->rm_col[c].rc_size);
-
-	rm->rm_col[c].rc_data = data;
-
-	for (c = c + 1; c < acols; c++)
-		rm->rm_col[c].rc_data = (char *)rm->rm_col[c - 1].rc_data +
-		    rm->rm_col[c - 1].rc_size;
+	if (alloc_data) {
+		for (c = 0; c < rm->rm_firstdatacol; c++)
+			rm->rm_col[c].rc_data =
+			    zio_buf_alloc(rm->rm_col[c].rc_size);
+		if (data != NULL)
+			rm->rm_col[c].rc_data = data;
+		for (c = c + 1; c < acols; c++)
+			rm->rm_col[c].rc_data =
+			    (char *)rm->rm_col[c - 1].rc_data +
+			    rm->rm_col[c - 1].rc_size;
+	}
 
 	/*
 	 * If all data stored spans all columns, there's a danger that parity
@@ -1621,7 +1644,7 @@ vdev_raidz_physio(vdev_t *vd, caddr_t data, size_t size,
 	 */
 	rm = vdev_raidz_map_alloc(data - (offset - origoffset),
 	    SPA_OLD_MAXBLOCKSIZE, origoffset, tvd->vdev_ashift,
-	    vd->vdev_children, vd->vdev_nparity);
+	    vd->vdev_children, vd->vdev_nparity, B_TRUE);
 
 	coloffset = origoffset;
 
@@ -1685,6 +1708,32 @@ vdev_raidz_asize(vdev_t *vd, uint64_t psize)
 	return (asize);
 }
 
+/*
+ * Converts an allocated size on a raidz vdev back to a logical block
+ * size. This is used in trimming to figure out the appropriate logical
+ * size to pass to vdev_raidz_map_alloc when splitting up extents of free
+ * space obtained from metaslabs. However, a range of free space on a
+ * raidz vdev might have originally consisted of multiple blocks and
+ * those, taken together with their skip blocks, might not always align
+ * neatly to a new vdev_raidz_map_alloc covering the entire unified
+ * range. So to ensure that the newly allocated raidz map *always* fits
+ * within the asize passed to this function and never exceeds it (since
+ * that might trim allocated data past it), we round it down to the
+ * nearest suitable multiple of the vdev ashift (hence the "_floor" in
+ * this function's name).
+ */
+static uint64_t
+vdev_raidz_psize_floor(vdev_t *vd, uint64_t asize)
+{
+	uint64_t psize = (asize / vd->vdev_children) *
+	    (vd->vdev_children - vd->vdev_nparity);
+
+	psize = P2ALIGN(psize, 1 << vd->vdev_top->vdev_ashift);
+	ASSERT(psize != 0);
+
+	return (psize);
+}
+
 static void
 vdev_raidz_child_done(zio_t *zio)
 {
@@ -1723,8 +1772,7 @@ vdev_raidz_io_start(zio_t *zio)
 	int c, i;
 
 	rm = vdev_raidz_map_alloc(zio->io_data, zio->io_size, zio->io_offset,
-	    tvd->vdev_ashift, vd->vdev_children,
-	    vd->vdev_nparity);
+	    tvd->vdev_ashift, vd->vdev_children, vd->vdev_nparity, B_TRUE);
 
 	zio->io_vsd = rm;
 	zio->io_vsd_ops = &vdev_raidz_vsd_ops;
@@ -2361,6 +2409,100 @@ vdev_raidz_state_change(vdev_t *vd, int faulted, int degraded)
 		vdev_set_state(vd, B_FALSE, VDEV_STATE_HEALTHY, VDEV_AUX_NONE);
 }
 
+static inline void
+vdev_raidz_trim_append_rc(dkioc_free_list_t *dfl, uint64_t *num_extsp,
+    const raidz_col_t *rc)
+{
+	uint64_t num_exts = *num_extsp;
+	ASSERT(rc->rc_size != 0);
+
+	if (dfl->dfl_num_exts > 0 &&
+	    dfl->dfl_exts[num_exts - 1].dfle_start +
+	    dfl->dfl_exts[num_exts - 1].dfle_length == rc->rc_offset) {
+		dfl->dfl_exts[num_exts - 1].dfle_length += rc->rc_size;
+	} else {
+		dfl->dfl_exts[num_exts].dfle_start = rc->rc_offset;
+		dfl->dfl_exts[num_exts].dfle_length = rc->rc_size;
+		(*num_extsp)++;
+	}
+}
+
+/*
+ * Processes a trim for a raidz vdev.
+ */
+static void
+vdev_raidz_trim(vdev_t *vd, zio_t *pio, void *trim_exts)
+{
+	dkioc_free_list_t *dfl = trim_exts;
+	dkioc_free_list_t **sub_dfls;
+	uint64_t *sub_dfls_num_exts;
+
+	sub_dfls = kmem_zalloc(sizeof (*sub_dfls) * vd->vdev_children,
+	    KM_SLEEP);
+	sub_dfls_num_exts = kmem_zalloc(sizeof (uint64_t) * vd->vdev_children,
+	    KM_SLEEP);
+	for (int i = 0; i < vd->vdev_children; i++) {
+		/*
+		 * We might over-allocate here, because the sub-lists can never
+		 * be longer than the parent list, but they can be shorter.
+		 * The underlying driver will discard zero-length extents.
+		 */
+		sub_dfls[i] = kmem_zalloc(DFL_SZ(dfl->dfl_num_exts), KM_SLEEP);
+		sub_dfls[i]->dfl_num_exts = dfl->dfl_num_exts;
+		sub_dfls[i]->dfl_flags = dfl->dfl_flags;
+		sub_dfls[i]->dfl_offset = dfl->dfl_offset;
+		/* don't copy the check func, because it isn't raidz-aware */
+	}
+
+	/*
+	 * Process all extents and redistribute them to the component vdevs
+	 * according to a computed raidz map geometry.
+	 */
+	for (int i = 0; i < dfl->dfl_num_exts; i++) {
+		uint64_t start = dfl->dfl_exts[i].dfle_start;
+		uint64_t length = dfl->dfl_exts[i].dfle_length;
+		raidz_map_t *rm = vdev_raidz_map_alloc(NULL,
+		    vdev_raidz_psize_floor(vd, length), start,
+		    vd->vdev_top->vdev_ashift, vd->vdev_children,
+		    vd->vdev_nparity, B_FALSE);
+
+		for (uint64_t j = 0; j < rm->rm_cols; j++) {
+			uint64_t devidx = rm->rm_col[j].rc_devidx;
+			vdev_raidz_trim_append_rc(sub_dfls[devidx],
+			    &sub_dfls_num_exts[devidx], &rm->rm_col[j]);
+		}
+		vdev_raidz_map_free(rm);
+	}
+
+	/*
+	 * Issue the component ioctls as children of the parent zio.
+	 */
+	for (int i = 0; i < vd->vdev_children; i++) {
+		if (sub_dfls_num_exts[i] != 0) {
+			zio_nowait(zio_ioctl(pio, vd->vdev_child[i]->vdev_spa,
+			    vd->vdev_child[i], DKIOCFREE,
+			    vdev_raidz_trim_done, sub_dfls[i],
+			    ZIO_FLAG_CANFAIL | ZIO_FLAG_DONT_PROPAGATE |
+			    ZIO_FLAG_DONT_RETRY));
+		} else {
+			dfl_free(sub_dfls[i]);
+		}
+	}
+	kmem_free(sub_dfls, sizeof (*sub_dfls) * vd->vdev_children);
+	kmem_free(sub_dfls_num_exts, sizeof (uint64_t) * vd->vdev_children);
+}
+
+/*
+ * Releases a dkioc_free_list_t from ioctls issued to component devices in
+ * vdev_raidz_dkioc_free.
+ */
+static void
+vdev_raidz_trim_done(zio_t *zio)
+{
+	ASSERT(zio->io_private != NULL);
+	dfl_free(zio->io_private);
+}
+
 vdev_ops_t vdev_raidz_ops = {
 	vdev_raidz_open,
 	vdev_raidz_close,
@@ -2370,6 +2512,7 @@ vdev_ops_t vdev_raidz_ops = {
 	vdev_raidz_state_change,
 	NULL,
 	NULL,
+	vdev_raidz_trim,
 	VDEV_TYPE_RAIDZ,	/* name of this vdev type */
 	B_FALSE			/* not a leaf vdev */
 };

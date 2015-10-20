@@ -21,7 +21,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
- * Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2013 Joyent, Inc.  All rights reserved.
  */
 
@@ -484,6 +484,10 @@ vdev_disk_open(vdev_t *vd, uint64_t *psize, uint64_t *max_psize,
 		(void) ldi_ev_register_callbacks(dvd->vd_lh, ecookie,
 		    &vdev_disk_dgrd_callb, (void *) vd, &lcb->lcb_id);
 	}
+
+	/* Reset TRIM flag, as underlying device support may have changed */
+	vd->vdev_notrim = B_FALSE;
+
 skip_open:
 	/*
 	 * Determine the actual size of the device.
@@ -757,6 +761,34 @@ vdev_disk_io_start(zio_t *zio)
 
 			break;
 
+		case DKIOCFREE:
+			/*
+			 * We perform device support checks here instead of
+			 * in zio_trim(), as zio_trim() might be invoked on
+			 * top of a top-level vdev, whereas vdev_disk_io_start
+			 * is guaranteed to be operating a leaf vdev.
+			 */
+			if (vd->vdev_notrim &&
+			    spa_get_force_trim(vd->vdev_spa) !=
+			    SPA_FORCE_TRIM_ON) {
+				zio->io_error = SET_ERROR(ENOTSUP);
+				break;
+			}
+
+			/*
+			 * zio->io_private contains a dkioc_free_list_t
+			 * specifying which offsets are to be freed
+			 */
+			ASSERT(zio->io_private != NULL);
+			error = ldi_ioctl(dvd->vd_lh, zio->io_cmd,
+			    (uintptr_t)zio->io_private, FKIOCTL, kcred, NULL);
+
+			if (error == ENOTSUP || error == ENOTTY)
+				vd->vdev_notrim = B_TRUE;
+			zio->io_error = error;
+
+			break;
+
 		default:
 			zio->io_error = SET_ERROR(ENOTSUP);
 		}
@@ -829,6 +861,7 @@ vdev_ops_t vdev_disk_ops = {
 	NULL,
 	vdev_disk_hold,
 	vdev_disk_rele,
+	NULL,
 	VDEV_TYPE_DISK,		/* name of this vdev type */
 	B_TRUE			/* leaf vdev */
 };

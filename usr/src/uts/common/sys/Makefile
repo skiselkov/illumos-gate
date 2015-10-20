@@ -183,6 +183,7 @@ CHKHDRS=			\
 	disp.h			\
 	dkbad.h			\
 	dkio.h			\
+	dkioc_free_util.h	\
 	dklabel.h		\
 	dl.h			\
 	dlpi.h			\

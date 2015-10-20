@@ -21,9 +21,7 @@
 
 /*
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
- */
-/*
- * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2016 Nexenta Systems, Inc.
  */
 
 /*
@@ -4825,7 +4823,7 @@ sata_txlt_unmap(sata_pkt_txlate_t *spx)
 	bdlen = scsipkt->pkt_cdbp[7];
 	bdlen = (bdlen << 8) + scsipkt->pkt_cdbp[8] - paramlen;
 	if ((bdlen < 0) || ((bdlen % 16) != 0) ||
-	    (bdlen > (bp->b_bcount - paramlen))) {
+	    ((bp != NULL) && (bdlen > (bp->b_bcount - paramlen)))) {
 		SATADBG1(SATA_DBG_SCSI_IF, spx->txlt_sata_hba_inst,
 		    "sata_txlt_unmap: invalid block descriptor length", NULL);
 		mutex_exit(cport_mutex);
