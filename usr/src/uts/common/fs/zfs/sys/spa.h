@@ -21,9 +21,8 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011, 2014 by Delphix. All rights reserved.
- * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
- * Copyright 2013 Saso Kiselkov. All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
  */
 
@@ -461,14 +460,15 @@ _NOTE(CONSTCOND) } while (0)
 	(0 == ((zc)->zc_word[0] | (zc)->zc_word[1] | \
 	(zc)->zc_word[2] | (zc)->zc_word[3]))
 
-#define	ZIO_CHECKSUM_BSWAP(zcp)					\
-{								\
-	(zcp)->zc_word[0] = BSWAP_64((zcp)->zc_word[0]);	\
-	(zcp)->zc_word[1] = BSWAP_64((zcp)->zc_word[1]);	\
-	(zcp)->zc_word[2] = BSWAP_64((zcp)->zc_word[2]);	\
-	(zcp)->zc_word[3] = BSWAP_64((zcp)->zc_word[3]);	\
-}
-
+#define	ZIO_CHECKSUM_BSWAP(_zc) \
+	do { \
+		zio_cksum_t *zc = (_zc); \
+		zc->zc_word[0] = BSWAP_64(zc->zc_word[0]); \
+		zc->zc_word[1] = BSWAP_64(zc->zc_word[1]); \
+		zc->zc_word[2] = BSWAP_64(zc->zc_word[2]); \
+		zc->zc_word[3] = BSWAP_64(zc->zc_word[3]); \
+		_NOTE(CONSTCOND) \
+	} while (0)
 
 #define	DVA_IS_VALID(dva)	(DVA_GET_ASIZE(dva) != 0)
 
@@ -631,14 +631,15 @@ extern void spa_inject_delref(spa_t *spa);
 extern void spa_scan_stat_init(spa_t *spa);
 extern int spa_scan_get_stats(spa_t *spa, pool_scan_stat_t *ps);
 
-#define	SPA_ASYNC_CONFIG_UPDATE	0x01
-#define	SPA_ASYNC_REMOVE	0x02
-#define	SPA_ASYNC_PROBE		0x04
-#define	SPA_ASYNC_RESILVER_DONE	0x08
-#define	SPA_ASYNC_RESILVER	0x10
-#define	SPA_ASYNC_AUTOEXPAND	0x20
-#define	SPA_ASYNC_REMOVE_DONE	0x40
-#define	SPA_ASYNC_REMOVE_STOP	0x80
+#define	SPA_ASYNC_CONFIG_UPDATE		0x01
+#define	SPA_ASYNC_REMOVE		0x02
+#define	SPA_ASYNC_PROBE			0x04
+#define	SPA_ASYNC_RESILVER_DONE		0x08
+#define	SPA_ASYNC_RESILVER		0x10
+#define	SPA_ASYNC_AUTOEXPAND		0x20
+#define	SPA_ASYNC_REMOVE_DONE		0x40
+#define	SPA_ASYNC_REMOVE_STOP		0x80
+#define	SPA_ASYNC_L2CACHE_REBUILD	0x100
 
 /*
  * Controls the behavior of spa_vdev_remove().
