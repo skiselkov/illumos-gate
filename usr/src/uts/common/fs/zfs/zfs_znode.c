@@ -98,6 +98,8 @@ krwlock_t zfsvfs_lock;
 
 static kmem_cache_t *znode_cache = NULL;
 
+static void smartcomp_check_comp(znode_smartcomp_t *sc);
+
 /*ARGSUSED*/
 static void
 znode_evict_error(dmu_buf_t *dbuf, void *user_ptr)
@@ -134,6 +136,9 @@ zfs_znode_cache_constructor(void *buf, void *arg, int kmflags)
 	avl_create(&zp->z_range_avl, zfs_range_compare,
 	    sizeof (rl_t), offsetof(rl_t, r_node));
 
+	bzero(&zp->z_smartcomp, sizeof (zp->z_smartcomp));
+	mutex_init(&zp->z_smartcomp.sc_lock, NULL, MUTEX_DEFAULT, NULL);
+
 	zp->z_dirlocks = NULL;
 	zp->z_acl_cached = NULL;
 	zp->z_moved = 0;
@@ -156,6 +161,7 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 	mutex_destroy(&zp->z_acl_lock);
 	avl_destroy(&zp->z_range_avl);
 	mutex_destroy(&zp->z_range_lock);
+	mutex_destroy(&zp->z_smartcomp.sc_lock);
 
 	ASSERT(zp->z_dirlocks == NULL);
 	ASSERT(zp->z_acl_cached == NULL);
@@ -610,6 +616,144 @@ zfs_znode_dmu_fini(znode_t *zp)
 
 	sa_handle_destroy(zp->z_sa_hdl);
 	zp->z_sa_hdl = NULL;
+}
+
+/*
+ * When in the compressing phase, we check our results every 1 MiB. If
+ * compression ratio drops below the threshold factor, we give up trying
+ * to compress the file for a while. The length of the interval is
+ * calculated from this interval value according to the algorithm in
+ * smartcomp_check_comp.
+ */
+uint64_t zfs_smartcomp_interval = 1 * 1024 * 1024;
+
+/*
+ * Minimum compression factor is 12.5% (100% / factor) - below that we
+ * consider compression to have failed.
+ */
+uint64_t zfs_smartcomp_threshold_factor = 8;
+
+/*
+ * Maximum power-of-2 exponent on the deny interval and consequently
+ * the maximum number of compression successes and failures we track.
+ * Successive compression failures extend the deny interval, whereas
+ * repeated successes makes the algorithm more hesitant to start denying.
+ */
+int64_t zfs_smartcomp_interval_exp = 5;
+
+/*
+ * Callback invoked by the zio machinery when it wants to compress a data
+ * block. If we are in the denying compression phase, we add the amount of
+ * data written to our stats and check if we've denied enough data to
+ * transition back in to the compression phase again.
+ */
+boolean_t
+zfs_znode_smartcomp_ask_cb(void *userinfo, const zio_t *zio)
+{
+	znode_t *zp = userinfo;
+	znode_smartcomp_t *sc = &zp->z_smartcomp;
+	znode_smartcomp_state_t old_state;
+
+	mutex_enter(&sc->sc_lock);
+	old_state = sc->sc_state;
+	if (sc->sc_state == ZNODE_SMARTCOMP_DENYING) {
+		sc->sc_orig_size += zio->io_orig_size;
+		if (sc->sc_orig_size >= sc->sc_deny_interval) {
+			/* time to retry compression on next call */
+			sc->sc_state = ZNODE_SMARTCOMP_COMPRESSING;
+			sc->sc_size = 0;
+			sc->sc_orig_size = 0;
+		}
+	}
+	mutex_exit(&sc->sc_lock);
+
+	return (old_state != ZNODE_SMARTCOMP_DENYING);
+}
+
+/*
+ * Callback invoked after compression has been performed to allow us to
+ * monitor compression performance. If we're in a compressing phase, we
+ * add the uncompressed and compressed data volumes to our state counters
+ * and see if we need to recheck compression performance in
+ * smartcomp_check_comp.
+ */
+void
+zfs_znode_smartcomp_result_cb(void *userinfo, const zio_t *zio)
+{
+	znode_t *zp = userinfo;
+	znode_smartcomp_t *sc = &zp->z_smartcomp;
+	uint64_t io_size = zio->io_size, io_orig_size = zio->io_orig_size;
+
+	if (io_orig_size == 0)
+		/* XXX: is this valid anyway? */
+		return;
+
+	mutex_enter(&sc->sc_lock);
+	if (sc->sc_state == ZNODE_SMARTCOMP_COMPRESSING) {
+		/* add last block's compression performance to our stats */
+		sc->sc_size += io_size;
+		sc->sc_orig_size += io_orig_size;
+		/* time to recheck compression performance? */
+		if (sc->sc_orig_size >= zfs_smartcomp_interval)
+			smartcomp_check_comp(sc);
+	}
+	mutex_exit(&sc->sc_lock);
+}
+
+/*
+ * Callback invoked when a DMU transaction for which we've been monitoring
+ * compression performance has finished. Here we simply release the vnode
+ * to allow it to be deallocated (we had to keep it around, since we keep
+ * our compression stats in the znode).
+ */
+/*ARGSUSED*/
+void
+zfs_znode_smartcomp_done_cb(void *userinfo, int error)
+{
+	VN_RELE(ZTOV((znode_t *)userinfo));
+}
+
+/*
+ * This function checks whether the compression we've been getting is above
+ * the threshold value. If it is, we decrement the sc_comp_failures counter
+ * to indicate compression success. If it isn't we increment the same
+ * counter and potentially start a compression deny phase.
+ */
+static void
+smartcomp_check_comp(znode_smartcomp_t *sc)
+{
+	uint64_t threshold = sc->sc_orig_size -
+	    sc->sc_orig_size / zfs_smartcomp_threshold_factor;
+
+	ASSERT(MUTEX_HELD(&sc->sc_lock));
+	if (sc->sc_size > threshold) {
+		sc->sc_comp_failures =
+		    MIN(sc->sc_comp_failures + 1, zfs_smartcomp_interval_exp);
+		if (sc->sc_comp_failures > 0) {
+			/* consistently getting too little compression, stop */
+			sc->sc_state = ZNODE_SMARTCOMP_DENYING;
+			sc->sc_deny_interval =
+			    zfs_smartcomp_interval << sc->sc_comp_failures;
+			/* randomize the interval by +-10% to avoid patterns */
+			sc->sc_deny_interval = (sc->sc_deny_interval -
+			    (sc->sc_deny_interval / 10)) +
+			    spa_get_random(sc->sc_deny_interval / 5 + 1);
+		}
+	} else {
+		if (sc->sc_comp_failures > 0) {
+			/*
+			 * We're biased for compression, so any success makes
+			 * us forget the file's past incompressibility.
+			 */
+			sc->sc_comp_failures = 0;
+		} else {
+			sc->sc_comp_failures = MAX(sc->sc_comp_failures - 1,
+			    -zfs_smartcomp_interval_exp);
+		}
+	}
+	/* reset state counters */
+	sc->sc_size = 0;
+	sc->sc_orig_size = 0;
 }
 
 /*

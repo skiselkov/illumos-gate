@@ -59,6 +59,7 @@
 #include <sys/zfs_ioctl.h>
 #include <sys/fs/zfs.h>
 #include <sys/dmu.h>
+#include <sys/dmu_tx.h>
 #include <sys/dmu_objset.h>
 #include <sys/spa.h>
 #include <sys/txg.h>
@@ -846,6 +847,20 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		dmu_tx_hold_sa(tx, zp->z_sa_hdl, B_FALSE);
 		dmu_tx_hold_write(tx, zp->z_id, woff, MIN(n, max_blksz));
 		zfs_sa_upgrade_txholds(tx, zp);
+
+		/* Set up smart compression callbacks. */
+		if (zfsvfs->z_os->os_smartcomp_enabled) {
+			zio_smartcomp_info_t smartcomp = {
+				zfs_znode_smartcomp_ask_cb,
+				zfs_znode_smartcomp_result_cb, zp
+			};
+
+			dmu_tx_set_smartcomp(tx, &smartcomp);
+			VN_HOLD(vp);
+			dmu_tx_callback_register(tx,
+			    zfs_znode_smartcomp_done_cb, zp);
+		}
+
 		error = dmu_tx_assign(tx, TXG_WAIT);
 		if (error) {
 			dmu_tx_abort(tx);

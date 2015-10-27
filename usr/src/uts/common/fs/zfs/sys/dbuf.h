@@ -112,6 +112,9 @@ typedef struct dbuf_dirty_record {
 	/* pointer back to our dbuf */
 	struct dmu_buf_impl *dr_dbuf;
 
+	/* smart compression info copy from initiating tx */
+	zio_smartcomp_info_t dr_smartcomp;
+
 	/* pointer to next dirty record */
 	struct dbuf_dirty_record *dr_next;
 

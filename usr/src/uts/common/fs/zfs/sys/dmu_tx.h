@@ -33,6 +33,7 @@
 #include <sys/dmu.h>
 #include <sys/txg.h>
 #include <sys/refcount.h>
+#include <sys/zio.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -63,6 +64,9 @@ struct dmu_tx {
 
 	/* list of dmu_tx_callback_t on this dmu_tx */
 	list_t tx_callbacks;
+
+	/* info passed to dbufs to enable smart compression */
+	zio_smartcomp_info_t tx_smartcomp;
 
 	/* placeholder for syncing context, doesn't need specific holds */
 	boolean_t tx_anyobj;
@@ -152,6 +156,8 @@ void dmu_tx_willuse_space(dmu_tx_t *tx, int64_t delta);
 void dmu_tx_dirty_buf(dmu_tx_t *tx, struct dmu_buf_impl *db);
 int dmu_tx_holds(dmu_tx_t *tx, uint64_t object);
 void dmu_tx_hold_space(dmu_tx_t *tx, uint64_t space);
+void dmu_tx_set_smartcomp(dmu_tx_t *tx, const zio_smartcomp_info_t *smartcomp);
+const zio_smartcomp_info_t *dmu_tx_get_smartcomp(dmu_tx_t *tx);
 
 #ifdef ZFS_DEBUG
 #define	DMU_TX_DIRTY_BUF(tx, db)	dmu_tx_dirty_buf(tx, db)

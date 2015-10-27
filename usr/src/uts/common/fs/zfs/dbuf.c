@@ -1299,6 +1299,8 @@ dbuf_dirty(dmu_buf_impl_t *db, dmu_tx_t *tx)
 	dr->dr_dbuf = db;
 	dr->dr_txg = tx->tx_txg;
 	dr->dr_next = *drp;
+	bcopy(dmu_tx_get_smartcomp(tx), &dr->dr_smartcomp,
+	    sizeof (dr->dr_smartcomp));
 	*drp = dr;
 
 	/*
@@ -3186,7 +3188,8 @@ dbuf_write(dbuf_dirty_record_t *dr, arc_buf_t *data, dmu_tx_t *tx)
 		dr->dr_zio = zio_write(zio, os->os_spa, txg,
 		    db->db_blkptr, contents, db->db.db_size, &zp,
 		    dbuf_write_override_ready, NULL, dbuf_write_override_done,
-		    dr, ZIO_PRIORITY_ASYNC_WRITE, ZIO_FLAG_MUSTSUCCEED, &zb);
+		    dr, ZIO_PRIORITY_ASYNC_WRITE, ZIO_FLAG_MUSTSUCCEED, &zb,
+		    &dr->dr_smartcomp);
 		mutex_enter(&db->db_mtx);
 		dr->dt.dl.dr_override_state = DR_NOT_OVERRIDDEN;
 		zio_write_override(dr->dr_zio, &dr->dt.dl.dr_overridden_by,
@@ -3199,13 +3202,15 @@ dbuf_write(dbuf_dirty_record_t *dr, arc_buf_t *data, dmu_tx_t *tx)
 		    db->db_blkptr, NULL, db->db.db_size, &zp,
 		    dbuf_write_nofill_ready, NULL, dbuf_write_nofill_done, db,
 		    ZIO_PRIORITY_ASYNC_WRITE,
-		    ZIO_FLAG_MUSTSUCCEED | ZIO_FLAG_NODATA, &zb);
+		    ZIO_FLAG_MUSTSUCCEED | ZIO_FLAG_NODATA, &zb,
+		    &dr->dr_smartcomp);
 	} else {
 		ASSERT(arc_released(data));
 		dr->dr_zio = arc_write(zio, os->os_spa, txg,
 		    db->db_blkptr, data, DBUF_IS_L2CACHEABLE(db),
 		    DBUF_IS_L2COMPRESSIBLE(db), &zp, dbuf_write_ready,
 		    dbuf_write_physdone, dbuf_write_done, db,
-		    ZIO_PRIORITY_ASYNC_WRITE, ZIO_FLAG_MUSTSUCCEED, &zb);
+		    ZIO_PRIORITY_ASYNC_WRITE, ZIO_FLAG_MUSTSUCCEED, &zb,
+		    &dr->dr_smartcomp);
 	}
 }

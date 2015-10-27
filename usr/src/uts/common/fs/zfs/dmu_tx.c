@@ -1651,3 +1651,22 @@ dmu_tx_hold_sa(dmu_tx_t *tx, sa_handle_t *hdl, boolean_t may_grow)
 		DB_DNODE_EXIT(db);
 	}
 }
+
+/*
+ * Sets the smart compression info in a transaction. Dbufs dirtied in this
+ * transaction copy this info to pass on to write zio's. These will then
+ * call the callbacks in the info to determine whether compression is needed.
+ * This must be called before the transaction is assigned to a txg.
+ */
+void
+dmu_tx_set_smartcomp(dmu_tx_t *tx, const zio_smartcomp_info_t *cb)
+{
+	ASSERT0(tx->tx_txg);
+	bcopy(cb, &tx->tx_smartcomp, sizeof (*cb));
+}
+
+const zio_smartcomp_info_t *
+dmu_tx_get_smartcomp(dmu_tx_t *tx)
+{
+	return (&tx->tx_smartcomp);
+}

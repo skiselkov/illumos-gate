@@ -177,6 +177,46 @@ typedef struct zfs_dirlock {
 	struct zfs_dirlock *dl_next;	/* next in z_dirlocks list */
 } zfs_dirlock_t;
 
+/*
+ * Smart Compression
+ *
+ * Smart compression is a simple heuristic algorithm that automatically
+ * tries to avoid compression on incompressible files by continuously
+ * monitoring per-file compression performance.
+ *
+ * The smart compression system has two states for each znode:
+ *	COMPRESSING: compression is applied to the file and results are
+ *		reevaluated at fixed check intervals to see if we should
+ *		continue attempting to compress.
+ *	DENYING: compression has failed too often, so we give up trying
+ *		for a while and retry at a later time.
+ *
+ * Each time compression succeeds, we bump down the sc_compression_failures
+ * counter down to a minimum of -5. This helps us to prevent starting
+ * denying in case of short incompressible transients. Each time
+ * compression fails, we bump up the sc_compression_failures counter up to
+ * a maximum of 5 (zfs_smartcomp_interval_shift). If the failure counter
+ * is > 0 at the time the compression failed, we transition from the
+ * COMPRESSING to the DENYING state and calculate a deny interval by
+ * multiplying zfs_smartcomp_interval and (1 << sc_compression_failures).
+ * This means that successive failures at compression will have us retry
+ * compression progressively less often down to approx 32x less often
+ * (by default) than the compression test interval. To avoid potential
+ * data patterns confusing us, the deny interval is randomized by +-10%.
+ */
+typedef enum znode_smartcomp_state {
+	ZNODE_SMARTCOMP_COMPRESSING = 0,
+	ZNODE_SMARTCOMP_DENYING
+} znode_smartcomp_state_t;
+
+typedef struct znode_smartcomp {
+	kmutex_t		sc_lock;
+	znode_smartcomp_state_t	sc_state;
+	uint64_t		sc_size, sc_orig_size;
+	uint64_t		sc_deny_interval;
+	int64_t			sc_comp_failures;
+} znode_smartcomp_t;
+
 typedef struct znode {
 	struct zfsvfs	*z_zfsvfs;
 	vnode_t		*z_vnode;
@@ -208,6 +248,7 @@ typedef struct znode {
 	list_node_t	z_link_node;	/* all znodes in fs link */
 	sa_handle_t	*z_sa_hdl;	/* handle to sa data */
 	boolean_t	z_is_sa;	/* are we native sa? */
+	znode_smartcomp_t z_smartcomp;	/* smart compression performance info */
 } znode_t;
 
 
@@ -313,6 +354,11 @@ extern dev_t	zfs_cmpldev(uint64_t);
 extern int	zfs_get_zplprop(objset_t *os, zfs_prop_t prop, uint64_t *value);
 extern int	zfs_get_stats(objset_t *os, nvlist_t *nv);
 extern void	zfs_znode_dmu_fini(znode_t *);
+
+/* Smart compression callbacks (see zio_smartcomp_info_t). */
+extern boolean_t zfs_znode_smartcomp_ask_cb(void *userinfo, const zio_t *zio);
+extern void zfs_znode_smartcomp_result_cb(void *userinfo, const zio_t *zio);
+extern void zfs_znode_smartcomp_done_cb(void *userinfo, int error);
 
 extern void zfs_log_create(zilog_t *zilog, dmu_tx_t *tx, uint64_t txtype,
     znode_t *dzp, znode_t *zp, char *name, vsecattr_t *, zfs_fuid_info_t *,
