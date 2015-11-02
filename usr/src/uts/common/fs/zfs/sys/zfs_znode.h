@@ -212,7 +212,8 @@ typedef enum znode_smartcomp_state {
 typedef struct znode_smartcomp {
 	kmutex_t		sc_lock;
 	znode_smartcomp_state_t	sc_state;
-	uint64_t		sc_size, sc_orig_size;
+	uint64_t		sc_size;
+	uint64_t		sc_orig_size;
 	uint64_t		sc_deny_interval;
 	int64_t			sc_comp_failures;
 } znode_smartcomp_t;

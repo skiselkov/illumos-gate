@@ -1025,45 +1025,34 @@ The
 compression algorithm compresses runs of zeros.
 .Pp
 This property can also be referred to by its shortened column name
-\fBcompress\fR. Changing this property affects only newly-written data.
-.RE
-
-.sp
-.ne 2
-.na
-\fBsmartcompression\fR=\fBon\fR | \fBoff\fR
-.ad
-.sp .6
-.RS 4n
-Smart compression is a feature which optimizes compression performance
-on filesystems which contain a mixture of compressible and
-incompressible data. When \fBcompression\fR is enabled on a filesystem,
-smart compression dynamically tracks per-file compression ratios to
-determine if a file is compressible or not. When the compression ratio
-being achieved is too low, smart compression progressively backs off
-attempting to compress the file.
-.sp
-The algorithm periodically checks whether new data written to a file
-previously deemed incompressible is still not compressible and adjusts
-behavior accordingly. Certain types of files, such as virtual machine
-disk files or large database files, can contain a mixture of both types
-of data. Although smart compression tries to detect these situations, in
-marginal cases it can be too pessimistic, which results in a reduction
-of the overall compression ratio. In this case, setting the
-\fBsmartcompression\fR property to \fBoff\fR turns off smart compression
-on a filesystem, so that data is always compressed regardless of the
-compression ratio achieved.
-.sp
-The default value is \fBon\fR.
-.RE
-
-.sp
-.ne 2
-.na
-\fB\fBcopies\fR=\fB1\fR | \fB2\fR | \fB3\fR\fR
-.ad
-.sp .6
-.RS 4n
+.Sy compress .
+Changing this property affects only newly-written data.
+.It Sy smartcompression Ns = Ns Sy on Ns | Ns Sy off
+Smart compression is a feature which optimizes compression performance on
+filesystems which contain a mixture of compressible and incompressible data.
+When
+.Sy compression
+is enabled on a filesystem, smart compression dynamically tracks per-file
+compression ratios to determine if a file is compressible or not. When the
+compression ratio being achieved is too low, smart compression progressively
+backs off attempting to compress the file.
+.Pp
+The algorithm periodically checks whether new data written to a file previously
+deemed incompressible is still not compressible and adjusts behavior
+accordingly. Certain types of files, such as virtual machine disk files or large
+database files, can contain a mixture of both types of data. Although smart
+compression tries to detect these situations, in marginal cases it can be too
+pessimistic, which results in a reduction of the overall compression ratio. In
+this case, setting the
+.Sy smartcompression
+property to
+.Sy off
+turns off smart compression on a filesystem, so that data is always compressed
+regardless of the compression ratio achieved.
+.Pp
+The default value is
+.Sy on .
+.It Sy copies Ns = Ns Sy 1 Ns | Ns Sy 2 Ns | Ns Sy 3
 Controls the number of copies of data stored for this dataset. These copies are
 in addition to any redundancy provided by the pool, for example, mirroring or
 RAID-Z. The copies are stored on different disks, if possible. The space used
