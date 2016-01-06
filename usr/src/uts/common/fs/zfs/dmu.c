@@ -1487,7 +1487,7 @@ dmu_sync_late_arrival_done(zio_t *zio)
 
 static int
 dmu_sync_late_arrival(zio_t *pio, objset_t *os, dmu_sync_cb_t *done, zgd_t *zgd,
-    zio_prop_t *zp, zbookmark_phys_t *zb)
+    zio_prop_t *zp, zbookmark_phys_t *zb, const zio_smartcomp_info_t *sc)
 {
 	dmu_sync_arg_t *dsa;
 	dmu_tx_t *tx;
@@ -1509,7 +1509,7 @@ dmu_sync_late_arrival(zio_t *pio, objset_t *os, dmu_sync_cb_t *done, zgd_t *zgd,
 	zio_nowait(zio_write(pio, os->os_spa, dmu_tx_get_txg(tx), zgd->zgd_bp,
 	    zgd->zgd_db->db_data, zgd->zgd_db->db_size, zp,
 	    dmu_sync_late_arrival_ready, NULL, dmu_sync_late_arrival_done, dsa,
-	    ZIO_PRIORITY_SYNC_WRITE, ZIO_FLAG_CANFAIL, zb));
+	    ZIO_PRIORITY_SYNC_WRITE, ZIO_FLAG_CANFAIL, zb, sc));
 
 	return (0);
 }
@@ -1551,6 +1551,7 @@ dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
 	zbookmark_phys_t zb;
 	zio_prop_t zp;
 	dnode_t *dn;
+	zio_smartcomp_info_t sc;
 
 	ASSERT(pio != NULL);
 	ASSERT(txg != 0);
@@ -1561,13 +1562,15 @@ dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
 	DB_DNODE_ENTER(db);
 	dn = DB_DNODE(db);
 	dmu_write_policy(os, dn, db->db_level, WP_DMU_SYNC, &zp);
+	dnode_setup_zio_smartcomp(db, &sc);
 	DB_DNODE_EXIT(db);
 
 	/*
 	 * If we're frozen (running ziltest), we always need to generate a bp.
 	 */
 	if (txg > spa_freeze_txg(os->os_spa))
-		return (dmu_sync_late_arrival(pio, os, done, zgd, &zp, &zb));
+		return (dmu_sync_late_arrival(pio, os, done, zgd, &zp, &zb,
+		    &sc));
 
 	/*
 	 * Grabbing db_mtx now provides a barrier between dbuf_sync_leaf()
@@ -1591,7 +1594,8 @@ dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
 		 * the dirty record anymore; just write a new log block.
 		 */
 		mutex_exit(&db->db_mtx);
-		return (dmu_sync_late_arrival(pio, os, done, zgd, &zp, &zb));
+		return (dmu_sync_late_arrival(pio, os, done, zgd, &zp, &zb,
+		    &sc));
 	}
 
 	dr = db->db_last_dirty;
@@ -1663,7 +1667,7 @@ dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
 	    bp, dr->dt.dl.dr_data, DBUF_IS_L2CACHEABLE(db),
 	    DBUF_IS_L2COMPRESSIBLE(db), &zp, dmu_sync_ready,
 	    NULL, dmu_sync_done, dsa, ZIO_PRIORITY_SYNC_WRITE,
-	    ZIO_FLAG_CANFAIL, &zb));
+	    ZIO_FLAG_CANFAIL, &zb, &sc));
 
 	return (0);
 }

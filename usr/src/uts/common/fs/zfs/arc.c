@@ -4772,7 +4772,8 @@ arc_write(zio_t *pio, spa_t *spa, uint64_t txg,
     blkptr_t *bp, arc_buf_t *buf, boolean_t l2arc, boolean_t l2arc_compress,
     const zio_prop_t *zp, arc_done_func_t *ready, arc_done_func_t *physdone,
     arc_done_func_t *done, void *private, zio_priority_t priority,
-    int zio_flags, const zbookmark_phys_t *zb)
+    int zio_flags, const zbookmark_phys_t *zb,
+    const zio_smartcomp_info_t *smartcomp)
 {
 	arc_buf_hdr_t *hdr = buf->b_hdr;
 	arc_write_callback_t *callback;
@@ -4797,7 +4798,7 @@ arc_write(zio_t *pio, spa_t *spa, uint64_t txg,
 
 	zio = zio_write(pio, spa, txg, bp, buf->b_data, hdr->b_size, zp,
 	    arc_write_ready, arc_write_physdone, arc_write_done, callback,
-	    priority, zio_flags, zb);
+	    priority, zio_flags, zb, smartcomp);
 
 	return (zio);
 }

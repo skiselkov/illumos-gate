@@ -3116,10 +3116,13 @@ dbuf_write(dbuf_dirty_record_t *dr, arc_buf_t *data, dmu_tx_t *tx)
 	zio_prop_t zp;
 	zio_t *zio;
 	int wp_flag = 0;
+	zio_smartcomp_info_t sc;
 
 	DB_DNODE_ENTER(db);
 	dn = DB_DNODE(db);
 	os = dn->dn_objset;
+
+	dnode_setup_zio_smartcomp(db, &sc);
 
 	if (db->db_state != DB_NOFILL) {
 		if (db->db_level > 0 || dn->dn_type == DMU_OT_DNODE) {
@@ -3186,7 +3189,8 @@ dbuf_write(dbuf_dirty_record_t *dr, arc_buf_t *data, dmu_tx_t *tx)
 		dr->dr_zio = zio_write(zio, os->os_spa, txg,
 		    db->db_blkptr, contents, db->db.db_size, &zp,
 		    dbuf_write_override_ready, NULL, dbuf_write_override_done,
-		    dr, ZIO_PRIORITY_ASYNC_WRITE, ZIO_FLAG_MUSTSUCCEED, &zb);
+		    dr, ZIO_PRIORITY_ASYNC_WRITE, ZIO_FLAG_MUSTSUCCEED, &zb,
+		    &sc);
 		mutex_enter(&db->db_mtx);
 		dr->dt.dl.dr_override_state = DR_NOT_OVERRIDDEN;
 		zio_write_override(dr->dr_zio, &dr->dt.dl.dr_overridden_by,
@@ -3199,13 +3203,13 @@ dbuf_write(dbuf_dirty_record_t *dr, arc_buf_t *data, dmu_tx_t *tx)
 		    db->db_blkptr, NULL, db->db.db_size, &zp,
 		    dbuf_write_nofill_ready, NULL, dbuf_write_nofill_done, db,
 		    ZIO_PRIORITY_ASYNC_WRITE,
-		    ZIO_FLAG_MUSTSUCCEED | ZIO_FLAG_NODATA, &zb);
+		    ZIO_FLAG_MUSTSUCCEED | ZIO_FLAG_NODATA, &zb, &sc);
 	} else {
 		ASSERT(arc_released(data));
 		dr->dr_zio = arc_write(zio, os->os_spa, txg,
 		    db->db_blkptr, data, DBUF_IS_L2CACHEABLE(db),
 		    DBUF_IS_L2COMPRESSIBLE(db), &zp, dbuf_write_ready,
 		    dbuf_write_physdone, dbuf_write_done, db,
-		    ZIO_PRIORITY_ASYNC_WRITE, ZIO_FLAG_MUSTSUCCEED, &zb);
+		    ZIO_PRIORITY_ASYNC_WRITE, ZIO_FLAG_MUSTSUCCEED, &zb, &sc);
 	}
 }

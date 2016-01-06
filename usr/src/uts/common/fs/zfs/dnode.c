@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
+ * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
  */
 
@@ -37,6 +38,8 @@
 #include <sys/zio.h>
 #include <sys/dmu_zfetch.h>
 #include <sys/range_tree.h>
+
+static void smartcomp_check_comp(dnode_smartcomp_t *sc);
 
 static kmem_cache_t *dnode_cache;
 /*
@@ -155,6 +158,10 @@ dnode_cons(void *arg, void *unused, int kmflag)
 	    offsetof(dmu_buf_impl_t, db_link));
 
 	dn->dn_moved = 0;
+
+	bzero(&dn->dn_smartcomp, sizeof (dn->dn_smartcomp));
+	mutex_init(&dn->dn_smartcomp.sc_lock, NULL, MUTEX_DEFAULT, NULL);
+
 	return (0);
 }
 
@@ -164,6 +171,8 @@ dnode_dest(void *arg, void *unused)
 {
 	int i;
 	dnode_t *dn = arg;
+
+	mutex_destroy(&dn->dn_smartcomp.sc_lock);
 
 	rw_destroy(&dn->dn_struct_rwlock);
 	mutex_destroy(&dn->dn_mtx);
@@ -2035,4 +2044,161 @@ out:
 		rw_exit(&dn->dn_struct_rwlock);
 
 	return (error);
+}
+
+/*
+ * When in the compressing phase, we check our results every 1 MiB. If
+ * compression ratio drops below the threshold factor, we give up trying
+ * to compress the file for a while. The length of the interval is
+ * calculated from this interval value according to the algorithm in
+ * smartcomp_check_comp.
+ */
+uint64_t zfs_smartcomp_interval = 1 * 1024 * 1024;
+
+/*
+ * Minimum compression factor is 12.5% (100% / factor) - below that we
+ * consider compression to have failed.
+ */
+uint64_t zfs_smartcomp_threshold_factor = 8;
+
+/*
+ * Maximum power-of-2 exponent on the deny interval and consequently
+ * the maximum number of compression successes and failures we track.
+ * Successive compression failures extend the deny interval, whereas
+ * repeated successes makes the algorithm more hesitant to start denying.
+ */
+int64_t zfs_smartcomp_interval_exp = 5;
+
+/*
+ * Callback invoked by the zio machinery when it wants to compress a data
+ * block. If we are in the denying compression phase, we add the amount of
+ * data written to our stats and check if we've denied enough data to
+ * transition back in to the compression phase again.
+ */
+boolean_t
+dnode_smartcomp_ask_cb(void *userinfo, const zio_t *zio)
+{
+	dnode_t *dn = userinfo;
+	dnode_smartcomp_t *sc;
+	dnode_smartcomp_state_t old_state;
+
+	ASSERT(dn != NULL);
+
+	sc = &dn->dn_smartcomp;
+	mutex_enter(&sc->sc_lock);
+	old_state = sc->sc_state;
+	if (sc->sc_state == DNODE_SMARTCOMP_DENYING) {
+		sc->sc_orig_size += zio->io_orig_size;
+		if (sc->sc_orig_size >= sc->sc_deny_interval) {
+			/* time to retry compression on next call */
+			sc->sc_state = DNODE_SMARTCOMP_COMPRESSING;
+			sc->sc_size = 0;
+			sc->sc_orig_size = 0;
+		}
+	}
+	mutex_exit(&sc->sc_lock);
+
+	return (old_state != DNODE_SMARTCOMP_DENYING);
+}
+
+/*
+ * Callback invoked after compression has been performed to allow us to
+ * monitor compression performance. If we're in a compressing phase, we
+ * add the uncompressed and compressed data volumes to our state counters
+ * and see if we need to recheck compression performance in
+ * smartcomp_check_comp.
+ */
+void
+dnode_smartcomp_result_cb(void *userinfo, const zio_t *zio)
+{
+	dnode_t *dn = userinfo;
+	dnode_smartcomp_t *sc;
+	uint64_t io_size = zio->io_size, io_orig_size = zio->io_orig_size;
+
+	ASSERT(dn != NULL);
+	sc = &dn->dn_smartcomp;
+
+	if (io_orig_size == 0)
+		/* XXX: is this valid anyway? */
+		return;
+
+	mutex_enter(&sc->sc_lock);
+	if (sc->sc_state == DNODE_SMARTCOMP_COMPRESSING) {
+		/* add last block's compression performance to our stats */
+		sc->sc_size += io_size;
+		sc->sc_orig_size += io_orig_size;
+		/* time to recheck compression performance? */
+		if (sc->sc_orig_size >= zfs_smartcomp_interval)
+			smartcomp_check_comp(sc);
+	}
+	mutex_exit(&sc->sc_lock);
+}
+
+/*
+ * This function checks whether the compression we've been getting is above
+ * the threshold value. If it is, we decrement the sc_comp_failures counter
+ * to indicate compression success. If it isn't we increment the same
+ * counter and potentially start a compression deny phase.
+ */
+static void
+smartcomp_check_comp(dnode_smartcomp_t *sc)
+{
+	uint64_t threshold = sc->sc_orig_size -
+	    sc->sc_orig_size / zfs_smartcomp_threshold_factor;
+
+	ASSERT(MUTEX_HELD(&sc->sc_lock));
+	if (sc->sc_size > threshold) {
+		sc->sc_comp_failures =
+		    MIN(sc->sc_comp_failures + 1, zfs_smartcomp_interval_exp);
+		if (sc->sc_comp_failures > 0) {
+			/* consistently getting too little compression, stop */
+			sc->sc_state = DNODE_SMARTCOMP_DENYING;
+			sc->sc_deny_interval =
+			    zfs_smartcomp_interval << sc->sc_comp_failures;
+			/* randomize the interval by +-10% to avoid patterns */
+			sc->sc_deny_interval = (sc->sc_deny_interval -
+			    (sc->sc_deny_interval / 10)) +
+			    spa_get_random(sc->sc_deny_interval / 5 + 1);
+		}
+	} else {
+		if (sc->sc_comp_failures > 0) {
+			/*
+			 * We're biased for compression, so any success makes
+			 * us forget the file's past incompressibility.
+			 */
+			sc->sc_comp_failures = 0;
+		} else {
+			sc->sc_comp_failures = MAX(sc->sc_comp_failures - 1,
+			    -zfs_smartcomp_interval_exp);
+		}
+	}
+	/* reset state counters */
+	sc->sc_size = 0;
+	sc->sc_orig_size = 0;
+}
+
+/*
+ * Prepares a zio_smartcomp_info_t structure for passing to zio_write or
+ * arc_write depending on whether smart compression should be applied to
+ * the specified objset, dnode and buffer.
+ */
+extern void
+dnode_setup_zio_smartcomp(dmu_buf_impl_t *db, zio_smartcomp_info_t *sc)
+{
+	dnode_t *dn = DB_DNODE(db);
+	objset_t *os = dn->dn_objset;
+
+	/* Only do smart compression on user data of plain files. */
+	if (dn->dn_type == DMU_OT_PLAIN_FILE_CONTENTS && db->db_level == 0 &&
+	    os->os_smartcomp_enabled && os->os_compress != ZIO_COMPRESS_OFF) {
+		sc->sc_ask = dnode_smartcomp_ask_cb;
+		sc->sc_result = dnode_smartcomp_result_cb;
+		sc->sc_userinfo = dn;
+	} else {
+		/*
+		 * Zeroing out the structure passed to zio_write will turn
+		 * smart compression off.
+		 */
+		bzero(sc, sizeof (*sc));
+	}
 }

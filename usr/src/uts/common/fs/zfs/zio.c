@@ -565,6 +565,10 @@ zio_create(zio_t *pio, spa_t *spa, uint64_t txg, const blkptr_t *bp,
 		if (zio->io_child_type == ZIO_CHILD_GANG)
 			zio->io_gang_leader = pio->io_gang_leader;
 		zio_add_child(pio, zio);
+
+		/* copy the smartcomp setting when creating child zio's */
+		bcopy(&pio->io_smartcomp, &zio->io_smartcomp,
+		    sizeof (zio->io_smartcomp));
 	}
 
 	return (zio);
@@ -704,7 +708,8 @@ zio_write(zio_t *pio, spa_t *spa, uint64_t txg, blkptr_t *bp,
     void *data, uint64_t size, const zio_prop_t *zp,
     zio_done_func_t *ready, zio_done_func_t *physdone, zio_done_func_t *done,
     void *private,
-    zio_priority_t priority, enum zio_flag flags, const zbookmark_phys_t *zb)
+    zio_priority_t priority, enum zio_flag flags, const zbookmark_phys_t *zb,
+    const zio_smartcomp_info_t *smartcomp)
 {
 	zio_t *zio;
 
@@ -725,6 +730,8 @@ zio_write(zio_t *pio, spa_t *spa, uint64_t txg, blkptr_t *bp,
 	zio->io_ready = ready;
 	zio->io_physdone = physdone;
 	zio->io_prop = *zp;
+	if (smartcomp != NULL)
+		bcopy(smartcomp, &zio->io_smartcomp, sizeof (*smartcomp));
 
 	/*
 	 * Data can be NULL if we are going to call zio_write_override() to
@@ -1161,7 +1168,8 @@ zio_write_bp_init(zio_t *zio)
 		    spa_max_replication(spa)) == BP_GET_NDVAS(bp));
 	}
 
-	if (compress != ZIO_COMPRESS_OFF) {
+	DTRACE_PROBE1(zio_compress_ready, zio_t *, zio);
+	if (compress != ZIO_COMPRESS_OFF && ZIO_SHOULD_COMPRESS(zio)) {
 		void *cbuf = zio_buf_alloc(lsize);
 		psize = zio_compress_data(compress, zio->io_data, cbuf, lsize);
 		if (psize == 0 || psize == lsize) {
@@ -1180,6 +1188,12 @@ zio_write_bp_init(zio_t *zio)
 			zio->io_pipeline = ZIO_INTERLOCK_PIPELINE;
 			ASSERT(spa_feature_is_active(spa,
 			    SPA_FEATURE_EMBEDDED_DATA));
+			if (zio->io_smartcomp.sc_result != NULL) {
+				zio->io_smartcomp.sc_result(
+				    zio->io_smartcomp.sc_userinfo, zio);
+			} else {
+				ASSERT(zio->io_smartcomp.sc_ask == NULL);
+			}
 			return (ZIO_PIPELINE_CONTINUE);
 		} else {
 			/*
@@ -1204,6 +1218,14 @@ zio_write_bp_init(zio_t *zio)
 				    psize, lsize, NULL);
 			}
 		}
+		if (zio->io_smartcomp.sc_result != NULL) {
+			zio->io_smartcomp.sc_result(
+			    zio->io_smartcomp.sc_userinfo, zio);
+		} else {
+			ASSERT(zio->io_smartcomp.sc_ask == NULL);
+		}
+	} else {
+		compress = ZIO_COMPRESS_OFF;
 	}
 
 	/*
@@ -1969,7 +1991,7 @@ zio_write_gang_block(zio_t *pio)
 		    (char *)pio->io_data + (pio->io_size - resid), lsize, &zp,
 		    zio_write_gang_member_ready, NULL, NULL, &gn->gn_child[g],
 		    pio->io_priority, ZIO_GANG_CHILD_FLAGS(pio),
-		    &pio->io_bookmark));
+		    &pio->io_bookmark, &pio->io_smartcomp));
 	}
 
 	/*
@@ -2359,7 +2381,7 @@ zio_ddt_write(zio_t *zio)
 		dio = zio_write(zio, spa, txg, bp, zio->io_orig_data,
 		    zio->io_orig_size, &czp, NULL, NULL,
 		    zio_ddt_ditto_write_done, dde, zio->io_priority,
-		    ZIO_DDT_CHILD_FLAGS(zio), &zio->io_bookmark);
+		    ZIO_DDT_CHILD_FLAGS(zio), &zio->io_bookmark, NULL);
 
 		zio_push_transform(dio, zio->io_data, zio->io_size, 0, NULL);
 		dde->dde_lead_zio[DDT_PHYS_DITTO] = dio;
@@ -2381,7 +2403,7 @@ zio_ddt_write(zio_t *zio)
 		cio = zio_write(zio, spa, txg, bp, zio->io_orig_data,
 		    zio->io_orig_size, zp, zio_ddt_child_write_ready, NULL,
 		    zio_ddt_child_write_done, dde, zio->io_priority,
-		    ZIO_DDT_CHILD_FLAGS(zio), &zio->io_bookmark);
+		    ZIO_DDT_CHILD_FLAGS(zio), &zio->io_bookmark, NULL);
 
 		zio_push_transform(cio, zio->io_data, zio->io_size, 0, NULL);
 		dde->dde_lead_zio[p] = cio;

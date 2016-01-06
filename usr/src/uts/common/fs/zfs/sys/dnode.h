@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2015 Nexenta Systems, Inc. All rights reserved.
  * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
  */
@@ -119,6 +120,47 @@ enum dnode_dirtycontext {
 
 /* Does dnode have a SA spill blkptr in bonus? */
 #define	DNODE_FLAG_SPILL_BLKPTR	(1<<2)
+
+/*
+ * Smart Compression
+ *
+ * Smart compression is a simple heuristic algorithm that automatically
+ * tries to avoid compression on incompressible objects by continuously
+ * monitoring per-object compression performance.
+ *
+ * The smart compression system has two states for each object:
+ *	COMPRESSING: compression is applied to the object and results are
+ *		reevaluated at fixed check intervals to see if we should
+ *		continue attempting to compress.
+ *	DENYING: compression has failed too often, so we give up trying
+ *		for a while and retry at a later time.
+ *
+ * Each time compression succeeds, we bump down the sc_compression_failures
+ * counter down to a minimum of -5. This helps us to prevent starting
+ * denying in case of short incompressible transients. Each time
+ * compression fails, we bump up the sc_compression_failures counter up to
+ * a maximum of 5 (zfs_smartcomp_interval_shift). If the failure counter
+ * is > 0 at the time the compression failed, we transition from the
+ * COMPRESSING to the DENYING state and calculate a deny interval by
+ * multiplying zfs_smartcomp_interval and (1 << sc_compression_failures).
+ * This means that successive failures at compression will have us retry
+ * compression progressively less often down to approx 32x less often
+ * (by default) than the compression test interval. To avoid potential
+ * data patterns confusing us, the deny interval is randomized by +-10%.
+ */
+typedef enum dnode_smartcomp_state {
+	DNODE_SMARTCOMP_COMPRESSING = 0,
+	DNODE_SMARTCOMP_DENYING
+} dnode_smartcomp_state_t;
+
+typedef struct dnode_smartcomp {
+	kmutex_t		sc_lock;
+	dnode_smartcomp_state_t	sc_state;
+	uint64_t		sc_size;
+	uint64_t		sc_orig_size;
+	uint64_t		sc_deny_interval;
+	int64_t			sc_comp_failures;
+} dnode_smartcomp_t;
 
 typedef struct dnode_phys {
 	uint8_t dn_type;		/* dmu_object_type_t */
@@ -242,6 +284,8 @@ typedef struct dnode {
 
 	/* holds prefetch structure */
 	struct zfetch	dn_zfetch;
+
+	dnode_smartcomp_t dn_smartcomp;	/* smart compression performance */
 } dnode_t;
 
 /*
@@ -304,6 +348,12 @@ int dnode_next_offset(dnode_t *dn, int flags, uint64_t *off,
     int minlvl, uint64_t blkfill, uint64_t txg);
 void dnode_evict_dbufs(dnode_t *dn);
 void dnode_evict_bonus(dnode_t *dn);
+
+/* Smart compression callbacks (see zio_smartcomp_info_t). */
+extern boolean_t dnode_smartcomp_ask_cb(void *userinfo, const zio_t *zio);
+extern void dnode_smartcomp_result_cb(void *userinfo, const zio_t *zio);
+extern void dnode_setup_zio_smartcomp(struct dmu_buf_impl *db,
+    zio_smartcomp_info_t *sc);
 
 #ifdef ZFS_DEBUG
 

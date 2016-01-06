@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
  * Copyright (c) 2013 by Saso Kiselkov. All rights reserved.
  * Copyright (c) 2013, Joyent, Inc. All rights reserved.
@@ -377,6 +377,30 @@ typedef struct zio_link {
 	list_node_t	zl_child_node;
 } zio_link_t;
 
+/*
+ * When smart compression is enabled, this callback info structure is
+ * passed to write zio's to monitor per-object compression performance.
+ *
+ * When zio_write determines that the `compression' setting for the dataset
+ * is not `off', if `sc_ask' is not NULL, it will call the `sc_ask' callback
+ * function, asking the upper layers whether it should really try to compress
+ * the object in question. If the function returns B_TRUE, compression is
+ * attempted. Once compression is done, sc_result is called to inform the
+ * upper layers of the compression result. By comparing the zio's io_size to
+ * io_orig_size it can monitor compression performance on the particular
+ * object in question (if io_size == io_orig_size, then compression failed).
+ * It is not legal to pass a NULL sc_ask but non-NULL sc_result to zio_write.
+ */
+typedef struct zio_smartcomp_info {
+	boolean_t (*sc_ask)(void *userinfo, const zio_t *);
+	void (*sc_result)(void *userinfo, const zio_t *);
+	void *sc_userinfo;
+} zio_smartcomp_info_t;
+
+#define	ZIO_SHOULD_COMPRESS(zio) \
+	((zio)->io_smartcomp.sc_ask == NULL || \
+	(zio)->io_smartcomp.sc_ask((zio)->io_smartcomp.sc_userinfo, (zio)))
+
 struct zio {
 	/* Core information about this I/O */
 	zbookmark_phys_t	io_bookmark;
@@ -397,6 +421,7 @@ struct zio {
 	zio_link_t	*io_walk_link;
 	zio_t		*io_logical;
 	zio_transform_t *io_transform_stack;
+	zio_smartcomp_info_t	io_smartcomp;
 
 	/* Callback info */
 	zio_done_func_t	*io_ready;
@@ -465,7 +490,8 @@ extern zio_t *zio_write(zio_t *pio, spa_t *spa, uint64_t txg, blkptr_t *bp,
     void *data, uint64_t size, const zio_prop_t *zp,
     zio_done_func_t *ready, zio_done_func_t *physdone, zio_done_func_t *done,
     void *private,
-    zio_priority_t priority, enum zio_flag flags, const zbookmark_phys_t *zb);
+    zio_priority_t priority, enum zio_flag flags, const zbookmark_phys_t *zb,
+    const zio_smartcomp_info_t *smartcomp);
 
 extern zio_t *zio_rewrite(zio_t *pio, spa_t *spa, uint64_t txg, blkptr_t *bp,
     void *data, uint64_t size, zio_done_func_t *done, void *private,

@@ -169,6 +169,14 @@ compression_changed_cb(void *arg, uint64_t newval)
 }
 
 static void
+smartcomp_changed_cb(void *arg, uint64_t newval)
+{
+	objset_t *os = arg;
+
+	os->os_smartcomp_enabled = newval ? B_TRUE : B_FALSE;
+}
+
+static void
 copies_changed_cb(void *arg, uint64_t newval)
 {
 	objset_t *os = arg;
@@ -391,6 +399,11 @@ dmu_objset_open_impl(spa_t *spa, dsl_dataset_t *ds, blkptr_t *bp,
 				err = dsl_prop_register(ds,
 				    zfs_prop_to_name(ZFS_PROP_COMPRESSION),
 				    compression_changed_cb, os);
+			}
+			if (err == 0) {
+				err = dsl_prop_register(ds,
+				    zfs_prop_to_name(ZFS_PROP_SMARTCOMPRESSION),
+				    smartcomp_changed_cb, os);
 			}
 			if (err == 0) {
 				err = dsl_prop_register(ds,
@@ -1117,7 +1130,7 @@ dmu_objset_sync(objset_t *os, zio_t *pio, dmu_tx_t *tx)
 	    os->os_rootbp, os->os_phys_buf, DMU_OS_IS_L2CACHEABLE(os),
 	    DMU_OS_IS_L2COMPRESSIBLE(os), &zp, dmu_objset_write_ready,
 	    NULL, dmu_objset_write_done, os, ZIO_PRIORITY_ASYNC_WRITE,
-	    ZIO_FLAG_MUSTSUCCEED, &zb);
+	    ZIO_FLAG_MUSTSUCCEED, &zb, NULL);
 
 	/*
 	 * Sync special dnodes - the parent IO for the sync is the root block
