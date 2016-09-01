@@ -1134,7 +1134,7 @@ static inline void arc_hdr_set_flags(arc_buf_hdr_t *hdr, arc_flags_t flags);
 static inline void arc_hdr_clear_flags(arc_buf_hdr_t *hdr, arc_flags_t flags);
 static arc_buf_contents_t arc_flags_to_bufc(uint32_t);
 
-static boolean_t l2arc_write_eligible(uint64_t, arc_buf_hdr_t *);
+static boolean_t l2arc_write_eligible(uint64_t, uint64_t, arc_buf_hdr_t *);
 static void l2arc_read_done(zio_t *);
 
 enum {
@@ -3232,7 +3232,7 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 	if (HDR_HAS_L2HDR(hdr)) {
 		ARCSTAT_INCR(arcstat_evict_l2_cached, HDR_GET_LSIZE(hdr));
 	} else {
-		if (l2arc_write_eligible(hdr->b_spa, hdr)) {
+		if (l2arc_write_eligible(hdr->b_spa, UINT64_MAX, hdr)) {
 			ARCSTAT_INCR(arcstat_evict_l2_eligible,
 			    HDR_GET_LSIZE(hdr));
 		} else {
@@ -6302,7 +6302,7 @@ arc_fini(void)
  */
 
 static boolean_t
-l2arc_write_eligible(uint64_t spa_guid, arc_buf_hdr_t *hdr)
+l2arc_write_eligible(uint64_t spa_guid, uint64_t sync_txg, arc_buf_hdr_t *hdr)
 {
 	/*
 	 * A buffer is *not* eligible for the L2ARC if it:
@@ -6310,9 +6310,11 @@ l2arc_write_eligible(uint64_t spa_guid, arc_buf_hdr_t *hdr)
 	 * 2. is already cached on the L2ARC.
 	 * 3. has an I/O in progress (it may be an incomplete read).
 	 * 4. is flagged not eligible (zfs property).
+	 * 5. is part of the syncing txg (and thus subject to change).
 	 */
 	if (hdr->b_spa != spa_guid || HDR_HAS_L2HDR(hdr) ||
-	    HDR_IO_IN_PROGRESS(hdr) || !HDR_L2CACHE(hdr))
+	    HDR_IO_IN_PROGRESS(hdr) || !HDR_L2CACHE(hdr) ||
+	    hdr->b_birth >= sync_txg)
 		return (B_FALSE);
 
 	return (B_TRUE);
@@ -6841,6 +6843,7 @@ l2arc_write_buffers(spa_t *spa, l2arc_dev_t *dev, uint64_t target_sz)
 	l2arc_write_callback_t *cb = NULL;
 	zio_t *pio, *wzio;
 	uint64_t guid = spa_load_guid(spa);
+	uint64_t sync_txg = spa_syncing_txg(spa);
 	boolean_t dev_hdr_update = B_FALSE;
 
 	ASSERT3P(dev->l2ad_vdev, !=, NULL);
@@ -6898,7 +6901,7 @@ l2arc_write_buffers(spa_t *spa, l2arc_dev_t *dev, uint64_t target_sz)
 				break;
 			}
 
-			if (!l2arc_write_eligible(guid, hdr)) {
+			if (!l2arc_write_eligible(guid, sync_txg, hdr)) {
 				mutex_exit(hash_lock);
 				continue;
 			}
