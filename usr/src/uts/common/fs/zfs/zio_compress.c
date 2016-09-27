@@ -59,6 +59,18 @@ zio_compress_info_t zio_compress_table[ZIO_COMPRESS_FUNCTIONS] = {
 	{gzip_compress,		gzip_decompress,	9,	"gzip-9"},
 	{zle_compress,		zle_decompress,		64,	"zle"},
 	{lz4_compress,		lz4_decompress,		0,	"lz4"},
+	{zstd_compress,		zstd_decompress,	1,	"zstd-1"},
+	{zstd_compress,		zstd_decompress,	2,	"zstd-2"},
+	{zstd_compress,		zstd_decompress,	3,	"zstd-3"},
+	{zstd_compress,		zstd_decompress,	4,	"zstd-4"},
+	{zstd_compress,		zstd_decompress,	5,	"zstd-5"},
+	{zstd_compress,		zstd_decompress,	6,	"zstd-6"},
+	{zstd_compress,		zstd_decompress,	7,	"zstd-7"},
+	{zstd_compress,		zstd_decompress,	8,	"zstd-8"},
+	{zstd_compress,		zstd_decompress,	9,	"zstd-9"},
+	{zstd_compress,		zstd_decompress,	20,	"zstd-20"},
+	{zstd_compress,		zstd_decompress,	21,	"zstd-21"},
+	{zstd_compress,		zstd_decompress,	22,	"zstd-22"},
 };
 
 enum zio_compress

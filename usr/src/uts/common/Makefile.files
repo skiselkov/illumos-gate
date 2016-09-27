@@ -1445,7 +1445,19 @@ ZFS_COMMON_OBJS +=		\
 	zio_compress.o		\
 	zio_inject.o		\
 	zle.o			\
-	zrlock.o
+	zrlock.o		\
+	zstd.o			\
+	zstd_compress.o		\
+	fse_compress.o		\
+	zbuff_compress.o		\
+	huf_compress.o		\
+	zbuff_decompress.o	\
+	zstd_decompress.o	\
+	huf_decompress.o	\
+	fse_decompress.o		\
+	zstd_common.o		\
+	entropy_common.o		\
+	xxhash.o
 
 ZFS_SHARED_OBJS +=		\
 	zfeature_common.o	\

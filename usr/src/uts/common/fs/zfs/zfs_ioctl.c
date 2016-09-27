@@ -3719,6 +3719,24 @@ zfs_ioc_rename(zfs_cmd_t *zc)
 }
 
 static int
+check_compress_feature(const char *dsname, int feature)
+{
+	spa_t *spa;
+	int err;
+
+	if ((err = spa_open(dsname, &spa, FTAG)) != 0)
+		return (err);
+
+	if (!spa_feature_is_enabled(spa, SPA_FEATURE_LZ4_COMPRESS)) {
+		spa_close(spa, FTAG);
+		return (SET_ERROR(ENOTSUP));
+	}
+	spa_close(spa, FTAG);
+
+	return (0);
+}
+
+static int
 zfs_check_settable(const char *dsname, nvpair_t *pair, cred_t *cr)
 {
 	const char *propname = nvpair_name(pair);
@@ -3798,19 +3816,16 @@ zfs_check_settable(const char *dsname, nvpair_t *pair, cred_t *cr)
 			    SPA_VERSION_ZLE_COMPRESSION))
 				return (SET_ERROR(ENOTSUP));
 
-			if (intval == ZIO_COMPRESS_LZ4) {
-				spa_t *spa;
+			if (intval == ZIO_COMPRESS_LZ4 &&
+			    (err = check_compress_feature(dsname,
+			    SPA_FEATURE_LZ4_COMPRESS)) != 0)
+				return (err);
 
-				if ((err = spa_open(dsname, &spa, FTAG)) != 0)
-					return (err);
-
-				if (!spa_feature_is_enabled(spa,
-				    SPA_FEATURE_LZ4_COMPRESS)) {
-					spa_close(spa, FTAG);
-					return (SET_ERROR(ENOTSUP));
-				}
-				spa_close(spa, FTAG);
-			}
+			if (intval >= ZIO_COMPRESS_ZSTD_1 &&
+			    intval <= ZIO_COMPRESS_ZSTD_22 &&
+			    (err = check_compress_feature(dsname,
+			    SPA_FEATURE_ZSTD_COMPRESS)) != 0)
+				return (err);
 
 			/*
 			 * If this is a bootable dataset then

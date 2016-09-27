@@ -186,6 +186,11 @@ zpool_feature_init(void)
 	    "LZ4 compression algorithm support.",
 	    ZFEATURE_FLAG_ACTIVATE_ON_ENABLE, NULL);
 
+	zfeature_register(SPA_FEATURE_ZSTD_COMPRESS,
+	    "org.illumos:zstd_compress", "zstd_compress",
+	    "Zstandard compression algorithm support.",
+	    ZFEATURE_FLAG_ACTIVATE_ON_ENABLE, NULL);
+
 	zfeature_register(SPA_FEATURE_MULTI_VDEV_CRASH_DUMP,
 	    "com.joyent:multi_vdev_crash_dump", "multi_vdev_crash_dump",
 	    "Crash dumps to multiple vdev pools.",

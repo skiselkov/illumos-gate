@@ -111,7 +111,19 @@ zfs_prop_init(void)
 		{ "gzip-8",	ZIO_COMPRESS_GZIP_8 },
 		{ "gzip-9",	ZIO_COMPRESS_GZIP_9 },
 		{ "zle",	ZIO_COMPRESS_ZLE },
-		{ "lz4",	ZIO_COMPRESS_LZ4 },
+		{ "zstd",	ZIO_COMPRESS_ZSTD_1 },
+		{ "zstd-1",	ZIO_COMPRESS_ZSTD_1 },
+		{ "zstd-2",	ZIO_COMPRESS_ZSTD_2 },
+		{ "zstd-3",	ZIO_COMPRESS_ZSTD_3 },
+		{ "zstd-4",	ZIO_COMPRESS_ZSTD_4 },
+		{ "zstd-5",	ZIO_COMPRESS_ZSTD_5 },
+		{ "zstd-6",	ZIO_COMPRESS_ZSTD_6 },
+		{ "zstd-7",	ZIO_COMPRESS_ZSTD_7 },
+		{ "zstd-8",	ZIO_COMPRESS_ZSTD_8 },
+		{ "zstd-9",	ZIO_COMPRESS_ZSTD_9 },
+		{ "zstd-20",	ZIO_COMPRESS_ZSTD_20 },
+		{ "zstd-21",	ZIO_COMPRESS_ZSTD_21 },
+		{ "zstd-22",	ZIO_COMPRESS_ZSTD_22 },
 		{ NULL }
 	};
 

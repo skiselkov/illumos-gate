@@ -333,6 +333,18 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/fs/zfs/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/fs/zfs/zstd/common/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/fs/zfs/zstd/compress/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/fs/zfs/zstd/decompress/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/fs/zut/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
