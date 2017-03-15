@@ -1,3 +1,4 @@
+#!/bin/ksh -p
 #
 # CDDL HEADER START
 #
@@ -20,20 +21,18 @@
 #
 
 #
-# Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
-# Use is subject to license terms.
-#
-
-#
-# Copyright (c) 2013 by Delphix. All rights reserved.
+# Copyright (c) 2017 by Tim Chase. All rights reserved.
 # Copyright (c) 2017 by Nexenta Systems, Inc. All rights reserved.
 #
 
-# Set the expected properties of zpool
-typeset -a properties=("size" "capacity" "altroot" "health" "guid" "version"
-    "bootfs" "delegation" "autoreplace" "cachefile" "dedupditto" "dedupratio"
-    "free" "allocated" "readonly" "comment" "expandsize" "freeing" "failmode"
-    "listsnapshots" "autoexpand" "forcetrim" "autotrim" "feature@async_destroy"
-    "feature@empty_bpobj" "feature@lz4_compress" "feature@multi_vdev_crash_dump"
-    "feature@spacemap_histogram" "feature@enabled_txg" "feature@hole_birth"
-    "feature@extensible_dataset" "feature@bookmarks")
+. $STF_SUITE/include/libtest.shlib
+. $STF_SUITE/tests/functional/trim/trim.cfg
+. $STF_SUITE/tests/functional/trim/trim.kshlib
+
+if [ -n "$HOST_POOL_NAME" ]; then
+	log_note "Creating TRIM host pool to control recordsize"
+	log_must $ZPOOL create -o cachefile=none -O recordsize=4k \
+	    -O mountpoint="$VDEVDIR" "$HOST_POOL_NAME" "$HOST_POOL_DISK"
+fi
+
+log_pass TRIM setup succeeded

@@ -26,7 +26,7 @@
  * Copyright (c) 2012, Joyent, Inc. All rights reserved.
  * Copyright (c) 2013 Steven Hartland. All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
- * Copyright 2016 Nexenta Systems, Inc.
+ * Copyright 2017 Nexenta Systems, Inc.
  */
 
 #ifndef	_LIBZFS_H
@@ -240,6 +240,7 @@ typedef struct splitflags {
  * Functions to manipulate pool and vdev state
  */
 extern int zpool_scan(zpool_handle_t *, pool_scan_func_t);
+extern int zpool_trim(zpool_handle_t *, boolean_t start, uint64_t rate);
 extern int zpool_clear(zpool_handle_t *, const char *, nvlist_t *);
 extern int zpool_reguid(zpool_handle_t *);
 extern int zpool_reopen(zpool_handle_t *);

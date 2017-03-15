@@ -21,7 +21,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
- * Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2013 Joyent, Inc.  All rights reserved.
  */
 
@@ -485,6 +485,10 @@ vdev_disk_open(vdev_t *vd, uint64_t *psize, uint64_t *max_psize,
 		(void) ldi_ev_register_callbacks(dvd->vd_lh, ecookie,
 		    &vdev_disk_dgrd_callb, (void *) vd, &lcb->lcb_id);
 	}
+
+	/* Reset TRIM flag, as underlying device support may have changed */
+	vd->vdev_notrim = B_FALSE;
+
 skip_open:
 	/*
 	 * Determine the actual size of the device.
@@ -754,6 +758,36 @@ vdev_disk_io_start(zio_t *zio)
 
 			break;
 
+		case DKIOCFREE:
+			if (!zfs_trim)
+				break;
+			/*
+			 * We perform device support checks here instead of
+			 * in zio_trim_*(), as zio_trim_*() might be invoked
+			 * on a top-level vdev, whereas vdev_disk_io_start
+			 * is guaranteed to be operating a leaf disk vdev.
+			 */
+			if (vd->vdev_notrim &&
+			    spa_get_force_trim(vd->vdev_spa) !=
+			    SPA_FORCE_TRIM_ON) {
+				zio->io_error = SET_ERROR(ENOTSUP);
+				break;
+			}
+
+			/*
+			 * zio->io_private contains a dkioc_free_list_t
+			 * specifying which offsets are to be freed
+			 */
+			ASSERT(zio->io_dfl != NULL);
+			error = ldi_ioctl(dvd->vd_lh, zio->io_cmd,
+			    (uintptr_t)zio->io_dfl, FKIOCTL, kcred, NULL);
+
+			if (error == ENOTSUP || error == ENOTTY)
+				vd->vdev_notrim = B_TRUE;
+			zio->io_error = error;
+
+			break;
+
 		default:
 			zio->io_error = SET_ERROR(ENOTSUP);
 		}
@@ -826,16 +860,17 @@ vdev_disk_io_done(zio_t *zio)
 }
 
 vdev_ops_t vdev_disk_ops = {
-	vdev_disk_open,
-	vdev_disk_close,
-	vdev_default_asize,
-	vdev_disk_io_start,
-	vdev_disk_io_done,
-	NULL,
-	vdev_disk_hold,
-	vdev_disk_rele,
-	VDEV_TYPE_DISK,		/* name of this vdev type */
-	B_TRUE			/* leaf vdev */
+	.vdev_op_open =		vdev_disk_open,
+	.vdev_op_close =	vdev_disk_close,
+	.vdev_op_asize =	vdev_default_asize,
+	.vdev_op_io_start =	vdev_disk_io_start,
+	.vdev_op_io_done =	vdev_disk_io_done,
+	.vdev_op_state_change =	NULL,
+	.vdev_op_hold =		vdev_disk_hold,
+	.vdev_op_rele =		vdev_disk_rele,
+	.vdev_op_trim =		NULL,
+	.vdev_op_type =		VDEV_TYPE_DISK,	/* name of this vdev type */
+	.vdev_op_leaf =		B_TRUE		/* leaf vdev */
 };
 
 /*

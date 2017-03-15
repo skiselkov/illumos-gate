@@ -24,7 +24,7 @@
 # Copyright (c) 2012 by Delphix. All rights reserved.
 # Copyright 2013 Saso Kiselkov. All rights reserved.
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
-# Copyright 2016 Nexenta Systems, Inc.
+# Copyright 2017 Nexenta Systems, Inc.
 # Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
 #
 
@@ -919,6 +919,7 @@ file path=usr/include/sys/dirent.h
 file path=usr/include/sys/disp.h
 file path=usr/include/sys/dkbad.h
 file path=usr/include/sys/dkio.h
+file path=usr/include/sys/dkioc_free_util.h
 file path=usr/include/sys/dklabel.h
 $(sparc_ONLY)file path=usr/include/sys/dkmpio.h
 $(i386_ONLY)file path=usr/include/sys/dktp/altsctr.h

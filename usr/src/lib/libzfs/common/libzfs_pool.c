@@ -23,7 +23,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011, 2015 by Delphix. All rights reserved.
  * Copyright (c) 2013, Joyent, Inc. All rights reserved.
- * Copyright 2016 Nexenta Systems, Inc.
+ * Copyright 2017 Nexenta Systems, Inc.
  * Copyright 2016 Igor Kozhukhov <ikozhukhov@gmail.com>
  */
 
@@ -1882,6 +1882,29 @@ zpool_scan(zpool_handle_t *zhp, pool_scan_func_t func)
 	} else {
 		return (zpool_standard_error(hdl, errno, msg));
 	}
+}
+
+/*
+ * Trim the pool.
+ */
+int
+zpool_trim(zpool_handle_t *zhp, boolean_t start, uint64_t rate)
+{
+	zfs_cmd_t zc = { 0 };
+	char msg[1024];
+	libzfs_handle_t *hdl = zhp->zpool_hdl;
+	trim_cmd_info_t tci = { .tci_start = start, .tci_rate = rate };
+
+	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
+	zc.zc_cookie = (uintptr_t)&tci;
+
+	if (zfs_ioctl(hdl, ZFS_IOC_POOL_TRIM, &zc) == 0)
+		return (0);
+
+	(void) snprintf(msg, sizeof (msg),
+	    dgettext(TEXT_DOMAIN, "cannot trim %s"), zc.zc_name);
+
+	return (zpool_standard_error(hdl, errno, msg));
 }
 
 /*
