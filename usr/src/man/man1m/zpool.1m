@@ -618,11 +618,9 @@ trim every once in a while during a maintenance window using the
 command.
 .Pp
 Automatic trim does not reclaim blocks after a delete immediately. Instead,
-it waits approximately 32-64 TXGs (or as defined by the
-.Nm zfs_txgs_per_trim
-tunable) to allow for more efficient aggregation of smaller portions of free
-space into fewer larger regions, as well as to allow for longer pool
-corruption recovery via
+it waits approximately 32-64 TXGs to allow for more efficient aggregation of
+smaller portions of free space into fewer larger regions, as well as to allow
+for longer pool corruption recovery via
 .Nm zpool Cm import Fl F .
 .It Sy forcetrim Ns = Ns Sy on Ns | Ns Sy off
 Controls whether device support is taken into consideration when issuing
@@ -1390,9 +1388,8 @@ Initiates a manual TRIM operation on all of the free space of a pool.
 This informs the underlying storage devices of all of the blocks that
 the pool no longer considers allocated, thus allowing thinly provisioned
 storage devices to reclaim them. Please note that this collects all
-space marked as "freed" in the pool immediately and doesn't wait the
-.Nm zfs_txgs_per_trim
-delay as automatic TRIM does. Hence, this can limit pool corruption recovery
+space marked as "freed" in the pool immediately and doesn't wait to age out
+blocks as automatic TRIM does. Hence, this can limit pool corruption recovery
 options during and immediately following the manual TRIM to 1-2 TXGs into the
 past (instead of the standard 32-64 of automatic TRIM). This approach,
 however, allows you to recover the maximum amount of free space from the pool
@@ -1426,12 +1423,6 @@ second) the TRIM is executed. This rate is applied on a per-vdev basis,
 i.e. every top-level vdev in the pool tries to match this speed. The rate
 argument supports common multiplier suffixes such as `k' for kilobytes,
 `m' for megabytes and `g' for gigabytes per second.
-.Pp
-Due to limitations in how the algorithm is designed, TRIMs are executed
-in whole-metaslab increments. Each top-level vdev contains approximately
-200 metaslabs, so a rate-limited TRIM progresses in steps. It TRIMs
-one metaslab completely and then waits for a while so that over the
-whole device, the speed averages out.
 .Pp
 When a manual TRIM operation is already in progress, this option
 changes its rate. To change a rate-limited TRIM to an unlimited one,
