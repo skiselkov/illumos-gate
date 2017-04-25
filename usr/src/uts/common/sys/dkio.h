@@ -30,7 +30,6 @@
 #define	_SYS_DKIO_H
 
 #include <sys/dklabel.h>	/* Needed for NDKMAP define */
-#include <sys/int_limits.h>	/* Needed for UINT16_MAX */
 
 #ifdef	__cplusplus
 extern "C" {
@@ -537,7 +536,7 @@ typedef struct dkioc_free_list_ext_s {
 typedef struct dkioc_free_list_s {
 	uint64_t		dfl_flags;
 	uint64_t		dfl_num_exts;
-	int64_t			dfl_offset;
+	uint64_t		dfl_offset;
 
 	/*
 	 * N.B. this is only an internal debugging API! This is only called

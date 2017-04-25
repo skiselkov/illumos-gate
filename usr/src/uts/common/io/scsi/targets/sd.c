@@ -5392,7 +5392,6 @@ sd_parse_blk_limits_vpd(struct sd_lun *un, uchar_t *vpd_pg)
 		lim->lim_max_unmap_descr_cnt = BE_IN32(&vpd_pg[24]);
 		lim->lim_opt_unmap_gran = BE_IN32(&vpd_pg[28]);
 		if ((vpd_pg[32] >> 7) == 1) {
-			/* left-most bit on each byte is a flag */
 			lim->lim_unmap_gran_align =
 			    ((vpd_pg[32] & 0x7f) << 24) | (vpd_pg[33] << 16) |
 			    (vpd_pg[34] << 8) | vpd_pg[35];
@@ -21556,6 +21555,7 @@ sd_send_scsi_UNMAP_issue_one(sd_ssc_t *ssc, unmap_param_hdr_t *uph,
 	const uint64_t		param_size = sizeof (unmap_param_hdr_t) +
 	    num_descr * sizeof (unmap_blk_descr_t);
 
+	ASSERT3U(param_size - 2, <=, UINT16_MAX);
 	uph->uph_data_len = BE_16(param_size - 2);
 	uph->uph_descr_data_len = BE_16(param_size - 8);
 
@@ -21614,9 +21614,9 @@ sd_send_scsi_UNMAP_issue_one(sd_ssc_t *ssc, unmap_param_hdr_t *uph,
  * Returns a pointer to the i'th block descriptor inside an UNMAP param list.
  */
 static inline unmap_blk_descr_t *
-UNMAP_blk_descr_i(void *buf, uint64_t i)
+UNMAP_blk_descr_i(void *buf, size_t i)
 {
-	return ((unmap_blk_descr_t *)((uint8_t *)buf +
+	return ((unmap_blk_descr_t *)((uintptr_t)buf +
 	    sizeof (unmap_param_hdr_t) + (i * sizeof (unmap_blk_descr_t))));
 }
 
@@ -21646,8 +21646,10 @@ sd_send_scsi_UNMAP_issue(dev_t dev, sd_ssc_t *ssc, const dkioc_free_list_t *dfl)
 	uph = kmem_zalloc(SD_UNMAP_PARAM_LIST_MAXSZ, KM_SLEEP);
 
 	partition = SDPART(dev);
-	(void) cmlb_partinfo(un->un_cmlbhandle, partition, &part_len_sysblks,
+	rval = cmlb_partinfo(un->un_cmlbhandle, partition, &part_len_sysblks,
 	    &part_off_sysblks, NULL, NULL, (void *)SD_PATH_DIRECT);
+	if (rval != 0)
+		goto out;
 	part_off = SD_SYSBLOCKS2BYTES(part_off_sysblks);
 	part_len = SD_SYSBLOCKS2BYTES(part_len_sysblks);
 
@@ -21658,6 +21660,11 @@ sd_send_scsi_UNMAP_issue(dev_t dev, sd_ssc_t *ssc, const dkioc_free_list_t *dfl)
 	    (uint64_t)lim->lim_max_unmap_lba_cnt * un->un_tgt_blocksize :
 	    UINT64_MAX;
 	descr_cnt_lim = MIN(lim->lim_max_unmap_descr_cnt, SD_UNMAP_MAX_DESCR);
+
+	if (dfl->dfl_offset >= part_len) {
+		rval = SET_ERROR(EINVAL);
+		goto out;
+	}
 
 	for (size_t i = 0; i < dfl->dfl_num_exts; i++) {
 		const dkioc_free_list_ext_t *ext = &dfl->dfl_exts[i];
@@ -21671,7 +21678,8 @@ sd_send_scsi_UNMAP_issue(dev_t dev, sd_ssc_t *ssc, const dkioc_free_list_t *dfl)
 			    bytes_issued), SD_TGTBLOCKS2BYTES(un, UINT32_MAX));
 
 			/* check partition limits */
-			if (ext_start + len > part_len) {
+			if (ext_start >= part_len ||
+			    dfl->dfl_offset + ext_start + len > part_len) {
 				rval = SET_ERROR(EINVAL);
 				goto out;
 			}
