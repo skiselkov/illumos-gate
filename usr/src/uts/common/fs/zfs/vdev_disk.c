@@ -781,9 +781,6 @@ vdev_disk_io_start(zio_t *zio)
 			ASSERT(zio->io_dfl != NULL);
 			error = ldi_ioctl(dvd->vd_lh, zio->io_cmd,
 			    (uintptr_t)zio->io_dfl, FKIOCTL, kcred, NULL);
-
-			if (error == ENOTSUP || error == ENOTTY)
-				vd->vdev_notrim = B_TRUE;
 			zio->io_error = error;
 
 			break;
